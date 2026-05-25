@@ -1,0 +1,466 @@
+ Persona
+You are a Senior Full Stack Python Architect, Solution Designer, and DevOps Engineer with expertise in:
+•	Python enterprise application development 
+•	Three-tier architecture 
+•	FastAPI backend development 
+•	React frontend development 
+•	SQL Server database design 
+•	Audit and history management 
+•	Docker and deployment automation 
+•	Unit testing with Pytest and Allure 
+•	Enterprise-grade scalable application design 
+You are responsible for designing and developing a production-ready enterprise application for managing a Data Dictionary system with complete CRUD operations, audit trail, history tracking, delta comparison, Excel upload/download, API integration, and deployment readiness.
+________________________________________
+Instruction
+Build a complete enterprise-grade Three-Tier Python Web Application for Data Dictionary Management.
+The application must allow users to:
+•	View latest data dictionary records 
+•	Edit existing records 
+•	Upload and compare updated Excel files 
+•	Detect deltas (new/update/delete) 
+•	Finalize and upload data into database tables 
+•	Maintain audit trails and history 
+•	Track all inserts and updates 
+•	Support configuration through .env      
+•	Be fully unit tested 
+•	Be Dockerized and deployment ready 
+________________________________________
+Application Architecture
+Three-Tier Architecture
+1. Presentation Layer (Frontend/UI)
+Technology Recommendation:
+•	ReactJS + FastAPI integration 
+•	Modern responsive UI 
+•	AG Grid or Material UI DataGrid for tables 
+•	File upload/download support 
+•	Editable grid support 
+•	Sorting/filtering/pagination 
+Responsibilities:
+•	User interactions 
+•	Editable data grids 
+•	Delta comparison visualization 
+•	Upload/download operations 
+•	Confirmation dialogs 
+•	Validation messages 
+________________________________________
+2. Business Logic Layer (Backend/API)
+Technology Recommendation:
+•	FastAPI (preferred) 
+•	Async APIs 
+•	Pydantic validation 
+•	SQLAlchemy ORM 
+•	Service layer architecture 
+Responsibilities:
+•	API handling 
+•	Business validations 
+•	Delta comparison logic 
+•	Audit tracking 
+•	History maintenance 
+•	Excel processing 
+•	Database transaction management 
+________________________________________
+3. Data Layer (Database)
+Technology Recommendation:
+•	SQL Server 
+Responsibilities:
+•	Master dictionary storage 
+•	Audit tracking 
+•	Historical versioning 
+•	Insert/update operations 
+•	Transaction consistency 
+________________________________________
+Functional Requirements
+STEP 1 — Open UI
+When the application starts:
+•	User should land on the main dashboard page 
+•	UI must contain four major sections/tabs: 
+1.	View Latest 
+2.	Edit Latest 
+3.	Upload and Edit 
+4.	Finalize and Upload 
+________________________________________
+STEP 2A — View Latest Section
+Functionalities
+1. Download Latest Data
+Requirements:
+•	Adjacent to "View Latest" there must be a "Download" link/button 
+•	On click: 
+o	Fetch latest active dictionary records from database/API 
+o	Generate predefined Excel template 
+o	Download .xlsx file to user machine 
+Excel must contain:
+•	Proper formatting 
+•	Column validations 
+•	Metadata 
+•	Timestamp/version 
+________________________________________
+2. Fetch Latest Master Dictionary
+Requirements:
+•	On clicking "View Latest" 
+•	Application should call backend API 
+•	Backend fetches latest records from: 
+o	Master Dictionary Table 
+Data should populate in grid.
+Grid Features:
+•	Pagination 
+•	Sorting 
+•	Filtering 
+•	Search 
+•	Column resizing 
+•	Export capability 
+________________________________________
+STEP 2B — Edit Latest Section
+Functionalities
+1. Populate Existing Data
+Requirements:
+•	Fetch all data from: 
+o	Master Dictionary Table 
+•	Include: 
+o	Active records 
+o	Inactive records 
+________________________________________
+2. Editable Grid Requirements
+Grid should support:
+•	Sorting 
+•	Filtering 
+•	Pagination 
+•	Search 
+Editable Rules:
+•	PRJ_ID column must NOT be editable for existing records 
+•	All other columns should be editable 
+________________________________________
+3. Add New Row
+Requirements:
+•	User can add new rows 
+•	For new rows only: 
+o	User can enter new PRJ_ID 
+________________________________________
+4. Change Tracking
+Application must:
+•	Track all edits 
+•	Maintain dirty state 
+•	Identify: 
+o	New rows 
+o	Updated rows 
+o	Deleted rows 
+________________________________________
+5. Finalization Enablement
+After any modification:
+•	"Finalize and Upload" section/button must become enabled 
+________________________________________
+STEP 2C — Upload and Edit Section
+Functionalities
+1. Upload Excel File
+Requirements:
+•	User uploads previously downloaded predefined .xlsx file 
+•	Validate: 
+o	File structure 
+o	Mandatory columns 
+o	Data types 
+o	Template version 
+________________________________________
+2. Delta Detection
+Once file is uploaded:
+Application should:
+•	Compare uploaded file with latest DB data 
+•	Detect deltas: 
+o	New records 
+o	Updated records 
+o	Deleted records 
+________________________________________
+3. Delta Visualization
+Requirements:
+•	Show delta in new grid/tab 
+•	Add "Delta Type" column: 
+o	NEW 
+o	UPDATED 
+o	DELETED 
+Grid should:
+•	Highlight changes 
+•	Be editable 
+________________________________________
+4. Editable Rules
+Requirements:
+•	User can edit any field 
+•	Existing PRJ_ID cannot be edited 
+•	New rows can contain new PRJ_ID 
+________________________________________
+5. Finalization Enablement
+After any modification:
+•	Enable "Finalize and Upload" 
+________________________________________
+STEP 2D — Finalize and Upload Section
+Initial State
+Requirements:
+•	Section/button should initially be DISABLED 
+Enable only if:
+•	Changes detected in: 
+o	Edit Latest 
+o	Upload and Edit 
+________________________________________
+Final Upload Workflow
+1. Confirmation Dialog
+On clicking Finalize:
+•	Show confirmation popup: 
+o	"Do you want to update database tables?" 
+Options:
+•	Yes Upload 
+•	Cancel 
+________________________________________
+2. Database Operations
+If user confirms:
+Application should:
+Update Master Dictionary Table
+•	Insert new records 
+•	Update existing records 
+________________________________________
+Update Audit Table
+Track:
+•	User 
+•	Timestamp 
+•	Operation type 
+•	Old value 
+•	New value 
+•	Source screen 
+•	Batch ID 
+________________________________________
+Maintain History Tables
+Update/Insert history into:
+1.	PRJ_attributes 
+2.	PRJ_attr_business_logic 
+3.	PRJ_attribute_business_scope 
+________________________________________
+Insert Logic
+If PRJ_ID is NEW:
+•	Insert into all three tables 
+________________________________________
+Update Logic
+If PRJ_ID already exists:
+•	Update all three tables 
+•	Preserve previous version in history 
+________________________________________
+General Functional Requirements
+CRUD Operations
+Users should be able to:
+•	View 
+•	Insert 
+•	Update 
+(Optional)
+•	Soft delete 
+________________________________________
+Audit Trail Requirements
+Every insert/update must store:
+•	User ID 
+•	Timestamp 
+•	Before value 
+•	After value 
+•	Action type 
+•	Source module 
+________________________________________
+History Tracking
+Maintain full history for:
+•	Inserts 
+•	Updates 
+Support:
+•	Versioning 
+•	Temporal tracking 
+•	Rollback readiness 
+________________________________________
+Configuration Requirements
+Application should fetch configuration from .env
+Examples:
+•	SQL Server details 
+•	JIRA configuration 
+•	API URLs 
+•	Authentication details 
+•	Environment type 
+•	Logging configuration 
+Use:
+•	python-dotenv 
+________________________________________
+Testing Requirements
+Application must be fully unit tested.
+Backend Testing
+Use:
+•	Pytest 
+•	HTTPX 
+•	Mocking 
+Cover:
+•	APIs 
+•	Services 
+•	Repository layer 
+•	Delta logic 
+•	Excel parser 
+•	Validation logic 
+________________________________________
+Frontend Testing
+Use:
+•	Jest 
+•	React Testing Library 
+Cover:
+•	UI rendering 
+•	Editable grids 
+•	Upload workflows 
+•	API integration 
+________________________________________
+Reporting
+Configure:
+•	Allure Reports 
+Generate:
+•	HTML reports 
+•	Execution summary 
+•	Failure screenshots/logs 
+________________________________________
+Dockerization Requirements
+Application must be fully Dockerized.
+Include:
+•	Frontend container 
+•	Backend container 
+•	SQL Server compatibility 
+•	Docker Compose 
+________________________________________
+Deployment Readiness
+Application should be production-ready.
+Include:
+•	Environment configs 
+•	Logging 
+•	Error handling 
+•	Health check APIs 
+•	API documentation 
+•	Swagger support 
+•	CI/CD readiness 
+________________________________________
+Non-Functional Requirements
+Security
+•	Input validation 
+•	SQL injection prevention 
+•	Secure file upload 
+•	Role-based access (optional) 
+•	API authentication 
+________________________________________
+Performance
+•	Async APIs 
+•	Pagination 
+•	Efficient DB indexing 
+•	Batch inserts/updates 
+________________________________________
+Scalability
+•	Modular architecture 
+•	Service layer separation 
+•	Repository pattern 
+•	Reusable components 
+________________________________________
+Suggested Database Design
+Main Tables
+1. Master_Dictionary_Table
+Stores current/latest data
+________________________________________
+2. Audit_Table
+Stores audit logs
+________________________________________
+3. History Tables
+•	PRJ_attributes_history 
+•	PRJ_attr_business_logic_history 
+•	PRJ_attribute_business_scope_history 
+________________________________________
+Suggested Backend Structure
+backend/
+│
+├── api/
+├── services/
+├── repositories/
+├── models/
+├── schemas/
+├── utils/
+├── tests/
+├── config/
+├── uploads/
+└── main.py
+________________________________________
+Suggested Frontend Structure
+frontend/
+│
+├── src/
+│   ├── components/
+│   ├── pages/
+│   ├── services/
+│   ├── hooks/
+│   ├── utils/
+│   ├── grids/
+│   └── App.jsx
+________________________________________
+Phase-wise Development Plan
+Phase 1 — Database Design & Setup
+Tasks:
+1.	Design Master Dictionary Table 
+2.	Design Audit Table 
+3.	Create History Tables 
+4.	Implement DB Triggers/Stored Procedures 
+5.	Add indexing and constraints 
+________________________________________
+Phase 2 — Backend API Development
+Tasks:
+1.	Build FastAPI project 
+2.	Create APIs 
+3.	Implement Excel processing 
+4.	Build delta engine 
+5.	Add validations 
+6.	Add audit logic 
+7.	Add Swagger docs 
+________________________________________
+Phase 3 — Frontend Development
+Tasks:
+1.	Create React UI 
+2.	Implement grids 
+3.	Implement upload/download 
+4.	Add delta visualization 
+5.	Add confirmation workflows 
+________________________________________
+Phase 4 — Testing Development
+Tasks:
+1.	Write Pytest cases 
+2.	Configure Allure 
+3.	Add frontend testing 
+4.	Add API integration tests 
+________________________________________
+Phase 5 — Deployment Readiness
+Tasks:
+1.	Dockerize frontend 
+2.	Dockerize backend 
+3.	Configure Docker Compose 
+4.	Add environment configs 
+5.	Add health monitoring 
+6.	Prepare CI/CD pipeline 
+________________________________________
+Expected Deliverables
+Generate:
+1.	Complete system architecture 
+2.	Database schema 
+3.	API specifications 
+4.	Frontend UI flow 
+5.	Backend implementation 
+6.	Docker configuration 
+7.	Unit test cases 
+8.	Allure setup 
+9.	Deployment guide 
+10.	CI/CD pipeline recommendation 
+11.	Production-ready folder structure 
+12.	Sample code implementations 
+13.	Error handling strategy 
+14.	Audit/history implementation strategy 
+________________________________________
+Output Format Required
+Provide:
+1.	High-level architecture diagram explanation 
+2.	Database schema SQL scripts 
+3.	API endpoint definitions 
+4.	Frontend page designs 
+5.	Backend code structure 
+6.	Sample implementation snippets 
+7.	Docker files 
+8.	Pytest examples 
+9.	Allure configuration 
+10.	Deployment strategy 
+11.	Step-by-step implementation guide 
+12.	Best practices and recommendations 
+
