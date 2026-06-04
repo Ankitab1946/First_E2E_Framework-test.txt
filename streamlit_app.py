@@ -207,6 +207,30 @@
 #         return []
 
 
+# def get_selected_prj_id_from_grid(selection_event, grid_records: list[dict]) -> str:
+#     """Return PRJ ID selected from a Streamlit dataframe selection event.
+
+#     Streamlit reruns the script after row selection. This helper keeps the UI
+#     independent of a separate dropdown and uses the selected row from the grid.
+#     """
+#     try:
+#         selected_rows = selection_event.selection.rows
+#     except Exception:
+#         try:
+#             selected_rows = selection_event.get("selection", {}).get("rows", [])
+#         except Exception:
+#             selected_rows = []
+
+#     if not selected_rows:
+#         return ""
+
+#     selected_index = selected_rows[0]
+#     if selected_index is None or selected_index >= len(grid_records):
+#         return ""
+
+#     return str(grid_records[selected_index].get("prj_id") or "").strip()
+
+
 # def boolean_label(value: bool | None) -> str:
 #     if value is None:
 #         return ""
@@ -743,19 +767,48 @@
 #     if st.session_state.show_soft_deleted:
 #         if not admin:
 #             st.warning("Only Admin users can reactivate soft deleted records.")
+
 #         soft_deleted_records = safe_soft_deleted_records(dictionary_service)
 #         if soft_deleted_records:
-#             st.dataframe(records_to_df(soft_deleted_records, limited=True), use_container_width=True, height=260)
-#             deleted_options = [str(r.get("prj_id")) for r in soft_deleted_records if r.get("prj_id")]
-#             deleted_prj_id = st.selectbox("Select soft deleted PRJ ID to make active", [""] + deleted_options, key="reactivate_prj_id")
-#             if deleted_prj_id and st.button("Make Active", type="primary"):
+#             soft_deleted_df = records_to_df(soft_deleted_records, limited=True)
+#             st.caption("Select one row from the soft-deleted grid, then click Activate Record. No separate PRJ ID dropdown is required.")
+#             soft_deleted_selection = st.dataframe(
+#                 soft_deleted_df,
+#                 use_container_width=True,
+#                 height=300,
+#                 key="soft_deleted_records_grid",
+#                 on_select="rerun",
+#                 selection_mode="single-row",
+#             )
+
+#             selected_deleted_prj_id = get_selected_prj_id_from_grid(
+#                 soft_deleted_selection,
+#                 soft_deleted_records,
+#             )
+
+#             if selected_deleted_prj_id:
+#                 st.success(f"Selected soft-deleted PRJ ID: {selected_deleted_prj_id}")
+#             else:
+#                 st.info("Select a row from the grid to enable activation.")
+
+#             if st.button(
+#                 "Activate Record",
+#                 type="primary",
+#                 disabled=not bool(selected_deleted_prj_id),
+#             ):
 #                 if not admin:
 #                     st.error("Only Admin users can make a soft deleted attribute active.")
 #                     st.stop()
 #                 try:
-#                     result = finalization_service.reactivate_attribute(deleted_prj_id, user_id=user_id)
+#                     result = finalization_service.reactivate_attribute(selected_deleted_prj_id, user_id=user_id)
 #                     st.session_state.last_result = result
-#                     st.success(f"Attribute reactivated. Batch ID: {result['batch_id']}")
+#                     st.session_state.dictionary_records = safe_search_records(
+#                         dictionary_service,
+#                         term=search_text,
+#                         portfolio=portfolio,
+#                     )
+#                     st.session_state.show_soft_deleted = False
+#                     st.success(f"Attribute reactivated and moved back to active records. Batch ID: {result['batch_id']}")
 #                     st.rerun()
 #                 except Exception as exc:
 #                     st.error(f"Reactivate failed: {exc}")
@@ -804,6 +857,7 @@
 #         st.dataframe(pd.DataFrame(prompts), use_container_width=True, height=520)
 #     except Exception as exc:
 #         st.error(f"Could not load prompt library: {exc}")
+
 import os
 from typing import Any
 from urllib.parse import quote
@@ -1203,6 +1257,7 @@ def init_state():
         "selected_portfolio": "ALL",
         "create_mode": False,
         "selected_record": None,
+        "selected_active_prj_id": "",
         "edit_mode": False,
         "open_create_modal": False,
         "open_edit_modal": False,
@@ -1389,7 +1444,30 @@ with tab_dictionary:
     df = records_to_df(records, limited=True)
 
     st.subheader("Latest Master Dictionary Records")
-    st.dataframe(df, use_container_width=True, height=430)
+    st.caption("Select one row from the grid, then use View/Edit or Soft Delete. No separate PRJ ID dropdown is required.")
+    active_selection = st.dataframe(
+        df,
+        use_container_width=True,
+        height=430,
+        key="active_dictionary_records_grid",
+        on_select="rerun",
+        selection_mode="single-row",
+    )
+    selected_active_prj_id = get_selected_prj_id_from_grid(active_selection, records)
+    if not selected_active_prj_id:
+        previous_selected_prj_id = str(st.session_state.get("selected_active_prj_id") or "").strip()
+        if previous_selected_prj_id and any(str(r.get("prj_id")) == previous_selected_prj_id for r in records):
+            selected_active_prj_id = previous_selected_prj_id
+
+    selected_active_record = next((r for r in records if str(r.get("prj_id")) == str(selected_active_prj_id)), None) if selected_active_prj_id else None
+    st.session_state.selected_active_prj_id = selected_active_prj_id
+    st.session_state.selected_record = selected_active_record
+
+    if selected_active_prj_id:
+        st.success(f"Selected PRJ ID: {selected_active_prj_id}")
+    elif not df.empty:
+        st.info("Select a row from the grid to enable View/Edit and Soft Delete.")
+
     if df.empty:
         st.info("No records found for the selected portfolio/search. Try Portfolio/Sector = ALL or Refresh Data.")
 
@@ -1479,35 +1557,41 @@ with tab_dictionary:
                         st.error(f"Create failed: {exc}")
 
     st.divider()
-    st.subheader("Select Existing Attribute")
-    prj_options = [str(r.get("prj_id")) for r in records if r.get("prj_id")]
-    selected_prj_id = st.selectbox("Select PRJ ID to view/edit", [""] + prj_options)
-    if selected_prj_id:
-        selected_record = next((r for r in records if str(r.get("prj_id")) == selected_prj_id), None)
-        st.session_state.selected_record = selected_record
-        b1, b2, b3, b4 = st.columns([1, 1.6, 1, 4.4])
-        with b1:
-            if st.button("View / Edit"):
-                if not admin:
-                    st.error("Only Admin users can edit attributes.")
-                    st.stop()
-                st.session_state.edit_mode = False
-                st.session_state.open_edit_modal = True
-                edit_attribute_modal.open()
-        with b2:
-            new_window_link("Open Edit in New Window", f"?page=edit_attribute&prj_id={quote(str(selected_prj_id))}")
-        with b3:
-            if st.button("Soft Delete"):
-                if not admin:
-                    st.error("Only Admin users can soft delete attributes.")
-                    st.stop()
-                try:
-                    result = finalization_service.soft_delete_attribute(selected_prj_id, user_id=user_id)
-                    st.session_state.last_result = result
-                    st.success(f"Attribute soft deleted. Batch ID: {result['batch_id']}")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Soft delete failed: {exc}")
+    st.subheader("Selected Attribute Actions")
+    st.caption("Actions below use the row selected in the Latest Master Dictionary Records grid above.")
+    b1, b2, b3, b4 = st.columns([1, 1.6, 1, 4.4])
+    with b1:
+        if st.button("View / Edit", disabled=not bool(selected_active_prj_id)):
+            if not admin:
+                st.error("Only Admin users can edit attributes.")
+                st.stop()
+            st.session_state.edit_mode = False
+            st.session_state.open_edit_modal = True
+            edit_attribute_modal.open()
+    with b2:
+        if selected_active_prj_id:
+            new_window_link("Open Edit in New Window", f"?page=edit_attribute&prj_id={quote(str(selected_active_prj_id))}")
+        else:
+            st.button("Open Edit in New Window", disabled=True)
+    with b3:
+        if st.button("Soft Delete", disabled=not bool(selected_active_prj_id)):
+            if not admin:
+                st.error("Only Admin users can soft delete attributes.")
+                st.stop()
+            try:
+                result = finalization_service.soft_delete_attribute(selected_active_prj_id, user_id=user_id)
+                st.session_state.last_result = result
+                st.session_state.dictionary_records = safe_search_records(
+                    dictionary_service,
+                    term=search_text,
+                    portfolio=portfolio,
+                )
+                st.session_state.selected_record = None
+                st.session_state.selected_active_prj_id = ""
+                st.success(f"Attribute soft deleted. Batch ID: {result['batch_id']}")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Soft delete failed: {exc}")
 
     if edit_attribute_modal.is_open() and st.session_state.selected_record:
         selected_record = st.session_state.selected_record
@@ -1663,3 +1747,6 @@ with tab_prompts:
         st.dataframe(pd.DataFrame(prompts), use_container_width=True, height=520)
     except Exception as exc:
         st.error(f"Could not load prompt library: {exc}")
+
+
+
