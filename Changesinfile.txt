@@ -1,0 +1,17 @@
+
+
+app/api/swagger_app.py
+app/api/__init__.py
+app/schemas_api.py
+app/repositories/filter_utils.py
+app/repositories/dictionary_repository.py
+app/repositories/audit_repository.py
+app/services/dictionary_service.py
+app/services/audit_service.py
+app/core/config.py
+streamlit_app.py
+requirements.txt
+.env.example
+README.md
+run_api.bat
+run_api.sh
