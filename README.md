@@ -282,90 +282,14 @@ Portfolio logic:
 
 `Overlapped Attribute = true` returns attributes where more than one portfolio/sector flag is true.
 
-## SQL Server Authentication Modes
+## Performance notes
 
-The application now supports three SQL Server authentication modes through `.env`:
+This version includes UI and database performance improvements:
 
-| Mode | Use case |
-|---|---|
-| `windows` | Local Windows / logged-in user integrated authentication |
-| `keytab` | Enterprise Kerberos authentication using `krb5.conf` and `krb5.keytab` |
-| `sql` | SQL Server username/password authentication |
+- SQLAlchemy engine/session factory is cached, so SQL Server connections are not recreated on every Streamlit rerun.
+- The main filtered grid result is cached in `st.session_state`; the API/DB is called again only when filters change, the user clicks Refresh Data, or a write operation completes.
+- Modal Close buttons no longer force an extra full-page `st.rerun()`.
+- Create modal renders the Close action before the full form, making close behavior faster.
+- Additional SQL Server indexes were added to `sql/01_schema.sql` for portfolio, active-record, PRJ_ID, section, audit, and history lookups.
 
-### Option 1: Windows Authentication with logged-in user
-
-Use this when running locally on Windows and your Windows account has access to `PRJ_DB`.
-
-```env
-ENABLE_DB=true
-SQLSERVER_AUTH_MODE=windows
-SQLSERVER_WINDOWS_AUTH=true
-SQLSERVER_SERVER=localhost\SQLEXPRESS
-SQLSERVER_DATABASE=PRJ_DB
-SQLSERVER_DRIVER=ODBC Driver 17 for SQL Server
-SQLSERVER_TRUST_CERT=yes
-SQLSERVER_ENCRYPT=no
-```
-
-### Option 2: Kerberos keytab authentication
-
-Use this when the application runs with a service principal and other teams provide `krb5.conf` / `krb5.keytab`.
-
-```env
-ENABLE_DB=true
-SQLSERVER_AUTH_MODE=keytab
-SQLSERVER_WINDOWS_AUTH=true
-SQLSERVER_SERVER=your-sql-server-fqdn
-SQLSERVER_DATABASE=PRJ_DB
-SQLSERVER_DRIVER=ODBC Driver 17 for SQL Server
-SQLSERVER_TRUST_CERT=yes
-SQLSERVER_ENCRYPT=no
-
-KRB5_CONFIG_PATH=/app/security/krb5.conf
-KRB5_KEYTAB_PATH=/app/security/krb5.keytab
-KRB5_PRINCIPAL=svc_prj_app@YOUR.REALM.COM
-KRB5_CACHE_PATH=/tmp/krb5cc_prj_app
-KRB5_KINIT_ENABLED=true
-KRB5_KINIT_COMMAND=kinit
-
-# Usually leave blank when the driver uses the Kerberos ticket cache.
-SQLSERVER_ODBC_AUTHENTICATION=
-```
-
-When `SQLSERVER_AUTH_MODE=keytab`, the app sets:
-
-```text
-KRB5_CONFIG
-KRB5_CLIENT_KTNAME
-KRB5CCNAME
-```
-
-If `KRB5_KINIT_ENABLED=true`, it also runs:
-
-```bash
-kinit -kt /app/security/krb5.keytab svc_prj_app@YOUR.REALM.COM
-```
-
-The SQLAlchemy/pyodbc connection then uses integrated authentication with the Kerberos ticket cache.
-
-### Option 3: SQL username/password authentication
-
-```env
-ENABLE_DB=true
-SQLSERVER_AUTH_MODE=sql
-SQLSERVER_WINDOWS_AUTH=false
-SQLSERVER_SERVER=your-sql-server-name
-SQLSERVER_DATABASE=PRJ_DB
-SQLSERVER_USER=your_sql_user
-SQLSERVER_PASSWORD=your_sql_password
-SQLSERVER_DRIVER=ODBC Driver 17 for SQL Server
-```
-
-### Important deployment note for keytab mode
-
-Do not commit real `krb5.keytab` files to Git or package them into shared zips. Mount them securely at runtime, for example:
-
-```text
-/app/security/krb5.conf
-/app/security/krb5.keytab
-```
+After replacing the package, rerun `sql/01_schema.sql` once against `PRJ_DB` to add the performance indexes. The script is idempotent and will not recreate tables.
