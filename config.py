@@ -11,14 +11,33 @@ class Settings(BaseSettings):
     use_api_for_filters: bool = True
 
     # SQL Server configuration.
-    # For Windows Authentication, set SQLSERVER_WINDOWS_AUTH=true.
+    # Supported auth modes:
+    #   windows  -> logged-in Windows user / integrated auth
+    #   keytab   -> Kerberos ticket from krb5.conf + keytab
+    #   sql      -> SQL username/password
     sqlserver_server: str = "localhost"
     sqlserver_database: str = "PRJ_DB"
-    sqlserver_windows_auth: bool = True
+    sqlserver_windows_auth: bool = True  # Backward-compatible legacy flag.
+    sqlserver_auth_mode: str = "windows"
     sqlserver_user: str = ""
     sqlserver_password: str = ""
     sqlserver_driver: str = "ODBC Driver 17 for SQL Server"
     sqlserver_trust_cert: str = "yes"
+    sqlserver_encrypt: str = "no"
+
+    # Kerberos / keytab configuration for Linux/Unix or enterprise deployments.
+    # Do not commit real keytab files to source control.
+    krb5_config_path: str = ""
+    krb5_keytab_path: str = ""
+    krb5_principal: str = ""
+    krb5_cache_path: str = ""
+    krb5_kinit_enabled: bool = False
+    krb5_kinit_command: str = "kinit"
+
+    # Optional ODBC authentication keyword.
+    # Usually leave blank for keytab mode when using a Kerberos ticket cache.
+    # Some environments may use values such as ActiveDirectoryIntegrated.
+    sqlserver_odbc_authentication: str = ""
 
     # Supported runtime environments shown in the Streamlit side panel.
     app_environments: str = "LOCAL,DEV,UAT,PROD"
@@ -79,13 +98,27 @@ class Settings(BaseSettings):
         return self.aws_secret_access_key or self.secret_key
 
     @property
+    def effective_sql_auth_mode(self) -> str:
+        mode = (self.sqlserver_auth_mode or "").strip().lower()
+        if mode in {"windows", "keytab", "sql"}:
+            return mode
+        # Backward compatibility with earlier versions that only had SQLSERVER_WINDOWS_AUTH.
+        return "windows" if self.sqlserver_windows_auth else "sql"
+
+    @property
     def database_url(self):
         query = {
             "driver": self.sqlserver_driver,
             "TrustServerCertificate": self.sqlserver_trust_cert,
+            "Encrypt": self.sqlserver_encrypt,
         }
 
-        if self.sqlserver_windows_auth:
+        if self.sqlserver_odbc_authentication:
+            query["Authentication"] = self.sqlserver_odbc_authentication
+
+        auth_mode = self.effective_sql_auth_mode
+
+        if auth_mode in {"windows", "keytab"}:
             query["Trusted_Connection"] = "yes"
             return URL.create(
                 "mssql+pyodbc",
