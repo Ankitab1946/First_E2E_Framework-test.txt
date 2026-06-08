@@ -118,6 +118,45 @@ def apply_selected_environment(environment_name: str) -> None:
     get_settings.cache_clear()
 
 
+def apply_selected_db_auth_mode(auth_label: str) -> None:
+    """Apply the DB authentication mode selected in the sidebar.
+
+    Default remains Windows logged-in user. Keytab mode reads krb5/keytab
+    settings from the UI/.env and prepares the runtime configuration used by
+    local Streamlit DB operations. API calls also receive the selected mode
+    through request headers.
+    """
+    mode_map = {
+        "Windows Logged-in User": "windows",
+        "Kerberos Keytab": "keytab",
+        "SQL Username/Password": "sql",
+    }
+    auth_mode = mode_map.get(auth_label, "windows")
+    os.environ["SQLSERVER_AUTH_MODE"] = auth_mode
+    os.environ["SQLSERVER_WINDOWS_AUTH"] = "true" if auth_mode in {"windows", "keytab"} else "false"
+    get_settings.cache_clear()
+
+
+def apply_keytab_runtime_values(
+    krb5_config_path: str,
+    krb5_keytab_path: str,
+    krb5_principal: str,
+    krb5_cache_path: str,
+    krb5_kinit_enabled: bool,
+) -> None:
+    """Apply sidebar Kerberos values to runtime environment variables."""
+    if krb5_config_path:
+        os.environ["KRB5_CONFIG_PATH"] = krb5_config_path
+    if krb5_keytab_path:
+        os.environ["KRB5_KEYTAB_PATH"] = krb5_keytab_path
+    if krb5_principal:
+        os.environ["KRB5_PRINCIPAL"] = krb5_principal
+    if krb5_cache_path:
+        os.environ["KRB5_CACHE_PATH"] = krb5_cache_path
+    os.environ["KRB5_KINIT_ENABLED"] = "true" if krb5_kinit_enabled else "false"
+    get_settings.cache_clear()
+
+
 def is_admin_user(user_id: str) -> bool:
     """Return True when the current user has admin rights.
 
@@ -175,10 +214,20 @@ def call_api_post(endpoint: str, payload: dict, timeout: int = 30) -> dict:
         base_url = base_url.replace(":8501", ":8502", 1)
     if not base_url:
         raise RuntimeError("API_BASE_URL is not configured.")
+    runtime_settings = get_settings()
+    headers = {
+        "X-User-Id": current_user(),
+        "X-Db-Auth-Mode": runtime_settings.effective_sql_auth_mode,
+        "X-Krb5-Config-Path": runtime_settings.krb5_config_path or "",
+        "X-Krb5-Keytab-Path": runtime_settings.krb5_keytab_path or "",
+        "X-Krb5-Principal": runtime_settings.krb5_principal or "",
+        "X-Krb5-Cache-Path": runtime_settings.krb5_cache_path or "",
+        "X-Krb5-Kinit-Enabled": "true" if runtime_settings.krb5_kinit_enabled else "false",
+    }
     response = requests.post(
         f"{base_url}{endpoint}",
         json=payload,
-        headers={"X-User-Id": current_user()},
+        headers=headers,
         timeout=timeout,
     )
     response.raise_for_status()
@@ -589,6 +638,58 @@ with st.sidebar:
     )
     apply_selected_environment(selected_env)
 
+    auth_labels = ["Windows Logged-in User", "Kerberos Keytab", "SQL Username/Password"]
+    auth_mode_to_label = {
+        "windows": "Windows Logged-in User",
+        "keytab": "Kerberos Keytab",
+        "sql": "SQL Username/Password",
+    }
+    current_auth_label = auth_mode_to_label.get(get_settings().effective_sql_auth_mode, "Windows Logged-in User")
+    selected_auth_label = st.selectbox(
+        "DB Authentication",
+        auth_labels,
+        index=auth_labels.index(current_auth_label),
+        key="sidebar_db_auth_selector",
+        help="Default is Windows logged-in user. Select Kerberos Keytab only when krb5.conf and krb5.keytab are available on this machine/server.",
+    )
+    apply_selected_db_auth_mode(selected_auth_label)
+
+    if selected_auth_label == "Kerberos Keytab":
+        keytab_settings = get_settings()
+        st.caption("Kerberos keytab settings")
+        krb5_config_path = st.text_input(
+            "krb5.conf path",
+            value=keytab_settings.krb5_config_path or "security/krb5.conf",
+            key="sidebar_krb5_config_path",
+        )
+        krb5_keytab_path = st.text_input(
+            "krb5.keytab path",
+            value=keytab_settings.krb5_keytab_path or "security/krb5.keytab",
+            key="sidebar_krb5_keytab_path",
+        )
+        krb5_principal = st.text_input(
+            "Kerberos principal",
+            value=keytab_settings.krb5_principal or "",
+            key="sidebar_krb5_principal",
+        )
+        krb5_cache_path = st.text_input(
+            "Kerberos cache path",
+            value=keytab_settings.krb5_cache_path or "krb5cc_prj_app",
+            key="sidebar_krb5_cache_path",
+        )
+        krb5_kinit_enabled = st.checkbox(
+            "Run kinit using keytab",
+            value=keytab_settings.krb5_kinit_enabled,
+            key="sidebar_krb5_kinit_enabled",
+        )
+        apply_keytab_runtime_values(
+            krb5_config_path=krb5_config_path,
+            krb5_keytab_path=krb5_keytab_path,
+            krb5_principal=krb5_principal,
+            krb5_cache_path=krb5_cache_path,
+            krb5_kinit_enabled=krb5_kinit_enabled,
+        )
+
 settings = get_settings()
 init_state()
 user_id = current_user()
@@ -621,6 +722,7 @@ with st.sidebar:
     st.write(f"Selected Environment: `{settings.selected_environment}`")
     st.write(f"Server: `{settings.sqlserver_server}`")
     st.write(f"Database: `{settings.sqlserver_database}`")
+    st.write(f"DB Auth Mode: `{settings.effective_sql_auth_mode}`")
     st.write(f"Windows Auth: `{settings.sqlserver_windows_auth}`")
     st.write(f"Database writes: `{'ON' if settings.enable_db else 'OFF / simulated'}`")
     st.write(f"Current User: `{user_id}`")
