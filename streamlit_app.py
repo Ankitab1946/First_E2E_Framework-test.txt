@@ -470,6 +470,7 @@ def init_state():
         "last_result": None,
         "last_s3_result": None,
         "show_soft_deleted": False,
+        "selected_user_role": "Admin",
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -623,7 +624,25 @@ with st.sidebar:
     st.write(f"Windows Auth: `{settings.sqlserver_windows_auth}`")
     st.write(f"Database writes: `{'ON' if settings.enable_db else 'OFF / simulated'}`")
     st.write(f"Current User: `{user_id}`")
-    st.write(f"Role: `{'ADMIN' if admin else 'VIEWER'}`")
+
+    role_options = ["Admin", "User"]
+    default_role = st.session_state.get("selected_user_role") or ("Admin" if admin else "User")
+    if default_role not in role_options:
+        default_role = "Admin" if admin else "User"
+
+    selected_user_role = st.selectbox(
+        "Role",
+        role_options,
+        index=role_options.index(default_role),
+        key="sidebar_role_dropdown",
+        help="Upload Document section is visible only when Role is Admin and the current user has admin permission.",
+    )
+    st.session_state.selected_user_role = selected_user_role
+    upload_document_visible = admin and selected_user_role == "Admin"
+
+    st.write(f"Configured Permission: `{'ADMIN' if admin else 'VIEWER'}`")
+    st.write(f"Effective Role: `{selected_user_role}`")
+    st.write(f"Upload Document: `{'VISIBLE' if upload_document_visible else 'HIDDEN'}`")
     st.write(f"Filter API: `{'ON' if settings.use_api_for_filters else 'OFF'}`")
     st.write(f"API Base URL: `{settings.api_base_url}`")
     if st.button("Refresh Data"):
@@ -636,6 +655,8 @@ st.info("Popup forms can be closed safely. For a resizable browser window, use t
 
 if not admin:
     st.warning("You are in VIEWER mode. Create/Edit/Upload Document/S3 export actions are available only for configured Admin users.")
+elif st.session_state.get("selected_user_role") != "Admin":
+    st.info("Role is set to User. Upload Document section is hidden. Switch Role to Admin to view Upload Document.")
 
 tab_dictionary, tab_audit, tab_prompts = st.tabs(["Data Dictionary", "Audit History", "Prompts Library"])
 
@@ -747,7 +768,7 @@ with tab_dictionary:
             except Exception as exc:
                 st.error(f"S3 export failed: {exc}")
 
-    if admin:
+    if upload_document_visible:
         with st.expander("Upload Document", expanded=False):
             uploaded_file = st.file_uploader("Upload predefined Data Dictionary Excel file", type=["xlsx"])
             if uploaded_file is not None:
