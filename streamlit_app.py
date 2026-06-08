@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Any
 from urllib.parse import quote
 
@@ -8,6 +9,7 @@ import streamlit as st
 from streamlit_modal import Modal
 
 from app.core.config import get_settings
+from app.core.database import reset_database_cache
 from app.services.audit_service import AuditService
 from app.services.dictionary_service import DictionaryService
 from app.services.excel_service import ExcelService
@@ -113,48 +115,14 @@ def apply_selected_environment(environment_name: str) -> None:
         value = os.getenv(source_name)
         if value not in (None, ""):
             os.environ[target_name] = value
+    previous_environment = os.environ.get("SELECTED_ENVIRONMENT")
     os.environ["SELECTED_ENVIRONMENT"] = environment_name.upper()
     os.environ["APP_ENV"] = environment_name.upper()
     get_settings.cache_clear()
-
-
-def apply_selected_db_auth_mode(auth_label: str) -> None:
-    """Apply the DB authentication mode selected in the sidebar.
-
-    Default remains Windows logged-in user. Keytab mode reads krb5/keytab
-    settings from the UI/.env and prepares the runtime configuration used by
-    local Streamlit DB operations. API calls also receive the selected mode
-    through request headers.
-    """
-    mode_map = {
-        "Windows Logged-in User": "windows",
-        "Kerberos Keytab": "keytab",
-        "SQL Username/Password": "sql",
-    }
-    auth_mode = mode_map.get(auth_label, "windows")
-    os.environ["SQLSERVER_AUTH_MODE"] = auth_mode
-    os.environ["SQLSERVER_WINDOWS_AUTH"] = "true" if auth_mode in {"windows", "keytab"} else "false"
-    get_settings.cache_clear()
-
-
-def apply_keytab_runtime_values(
-    krb5_config_path: str,
-    krb5_keytab_path: str,
-    krb5_principal: str,
-    krb5_cache_path: str,
-    krb5_kinit_enabled: bool,
-) -> None:
-    """Apply sidebar Kerberos values to runtime environment variables."""
-    if krb5_config_path:
-        os.environ["KRB5_CONFIG_PATH"] = krb5_config_path
-    if krb5_keytab_path:
-        os.environ["KRB5_KEYTAB_PATH"] = krb5_keytab_path
-    if krb5_principal:
-        os.environ["KRB5_PRINCIPAL"] = krb5_principal
-    if krb5_cache_path:
-        os.environ["KRB5_CACHE_PATH"] = krb5_cache_path
-    os.environ["KRB5_KINIT_ENABLED"] = "true" if krb5_kinit_enabled else "false"
-    get_settings.cache_clear()
+    if previous_environment and previous_environment.upper() != environment_name.upper():
+        reset_database_cache()
+        st.session_state.pop("dictionary_records_cache_key", None)
+        st.session_state.pop("dictionary_records_cache", None)
 
 
 def is_admin_user(user_id: str) -> bool:
@@ -214,20 +182,10 @@ def call_api_post(endpoint: str, payload: dict, timeout: int = 30) -> dict:
         base_url = base_url.replace(":8501", ":8502", 1)
     if not base_url:
         raise RuntimeError("API_BASE_URL is not configured.")
-    runtime_settings = get_settings()
-    headers = {
-        "X-User-Id": current_user(),
-        "X-Db-Auth-Mode": runtime_settings.effective_sql_auth_mode,
-        "X-Krb5-Config-Path": runtime_settings.krb5_config_path or "",
-        "X-Krb5-Keytab-Path": runtime_settings.krb5_keytab_path or "",
-        "X-Krb5-Principal": runtime_settings.krb5_principal or "",
-        "X-Krb5-Cache-Path": runtime_settings.krb5_cache_path or "",
-        "X-Krb5-Kinit-Enabled": "true" if runtime_settings.krb5_kinit_enabled else "false",
-    }
     response = requests.post(
         f"{base_url}{endpoint}",
         json=payload,
-        headers=headers,
+        headers={"X-User-Id": current_user()},
         timeout=timeout,
     )
     response.raise_for_status()
@@ -254,6 +212,46 @@ def safe_filter_records(dictionary_service: DictionaryService, filters: dict) ->
         fallback = DictionaryService()
         fallback.settings.enable_db = False
         return fallback.filter_records(filters)
+
+
+def _cache_key(payload: dict) -> str:
+    """Stable cache key for Streamlit session-state data caches."""
+    return json.dumps(payload, sort_keys=True, default=str)
+
+
+def invalidate_dictionary_cache() -> None:
+    """Force the next grid render to reload records from API/DB."""
+    st.session_state.pop("dictionary_records_cache_key", None)
+    st.session_state.pop("dictionary_records_cache", None)
+
+
+def get_cached_filter_records(
+    dictionary_service: DictionaryService,
+    filters: dict,
+    force_refresh: bool = False,
+) -> list[dict]:
+    """Return filtered records without re-calling API/DB on every Streamlit rerun.
+
+    This makes modal open/close actions fast because they no longer reload the
+    main grid unless filters changed or a write operation invalidated the cache.
+    """
+    key = _cache_key({
+        "filters": filters,
+        "env": get_settings().selected_environment,
+        "api_base_url": get_settings().api_base_url,
+        "enable_db": get_settings().enable_db,
+    })
+    if (
+        not force_refresh
+        and st.session_state.get("dictionary_records_cache_key") == key
+        and "dictionary_records_cache" in st.session_state
+    ):
+        return st.session_state.dictionary_records_cache
+
+    records = safe_filter_records(dictionary_service, filters)
+    st.session_state.dictionary_records_cache_key = key
+    st.session_state.dictionary_records_cache = records
+    return records
 
 
 def safe_filter_audit(audit_service: AuditService, filters: dict) -> list[dict]:
@@ -520,6 +518,9 @@ def init_state():
         "last_s3_result": None,
         "show_soft_deleted": False,
         "selected_user_role": "Admin",
+        "dictionary_records_cache_key": "",
+        "dictionary_records_cache": [],
+        "force_refresh_records": False,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -638,58 +639,6 @@ with st.sidebar:
     )
     apply_selected_environment(selected_env)
 
-    auth_labels = ["Windows Logged-in User", "Kerberos Keytab", "SQL Username/Password"]
-    auth_mode_to_label = {
-        "windows": "Windows Logged-in User",
-        "keytab": "Kerberos Keytab",
-        "sql": "SQL Username/Password",
-    }
-    current_auth_label = auth_mode_to_label.get(get_settings().effective_sql_auth_mode, "Windows Logged-in User")
-    selected_auth_label = st.selectbox(
-        "DB Authentication",
-        auth_labels,
-        index=auth_labels.index(current_auth_label),
-        key="sidebar_db_auth_selector",
-        help="Default is Windows logged-in user. Select Kerberos Keytab only when krb5.conf and krb5.keytab are available on this machine/server.",
-    )
-    apply_selected_db_auth_mode(selected_auth_label)
-
-    if selected_auth_label == "Kerberos Keytab":
-        keytab_settings = get_settings()
-        st.caption("Kerberos keytab settings")
-        krb5_config_path = st.text_input(
-            "krb5.conf path",
-            value=keytab_settings.krb5_config_path or "security/krb5.conf",
-            key="sidebar_krb5_config_path",
-        )
-        krb5_keytab_path = st.text_input(
-            "krb5.keytab path",
-            value=keytab_settings.krb5_keytab_path or "security/krb5.keytab",
-            key="sidebar_krb5_keytab_path",
-        )
-        krb5_principal = st.text_input(
-            "Kerberos principal",
-            value=keytab_settings.krb5_principal or "",
-            key="sidebar_krb5_principal",
-        )
-        krb5_cache_path = st.text_input(
-            "Kerberos cache path",
-            value=keytab_settings.krb5_cache_path or "krb5cc_prj_app",
-            key="sidebar_krb5_cache_path",
-        )
-        krb5_kinit_enabled = st.checkbox(
-            "Run kinit using keytab",
-            value=keytab_settings.krb5_kinit_enabled,
-            key="sidebar_krb5_kinit_enabled",
-        )
-        apply_keytab_runtime_values(
-            krb5_config_path=krb5_config_path,
-            krb5_keytab_path=krb5_keytab_path,
-            krb5_principal=krb5_principal,
-            krb5_cache_path=krb5_cache_path,
-            krb5_kinit_enabled=krb5_kinit_enabled,
-        )
-
 settings = get_settings()
 init_state()
 user_id = current_user()
@@ -722,7 +671,6 @@ with st.sidebar:
     st.write(f"Selected Environment: `{settings.selected_environment}`")
     st.write(f"Server: `{settings.sqlserver_server}`")
     st.write(f"Database: `{settings.sqlserver_database}`")
-    st.write(f"DB Auth Mode: `{settings.effective_sql_auth_mode}`")
     st.write(f"Windows Auth: `{settings.sqlserver_windows_auth}`")
     st.write(f"Database writes: `{'ON' if settings.enable_db else 'OFF / simulated'}`")
     st.write(f"Current User: `{user_id}`")
@@ -748,8 +696,9 @@ with st.sidebar:
     st.write(f"Filter API: `{'ON' if settings.use_api_for_filters else 'OFF'}`")
     st.write(f"API Base URL: `{settings.api_base_url}`")
     if st.button("Refresh Data"):
-        st.session_state.dictionary_records = safe_filter_records(dictionary_service, {"portfolios": [st.session_state.selected_portfolio], "active_only": True, "limit": 2000})
-        st.success("Data refreshed")
+        invalidate_dictionary_cache()
+        st.session_state.force_refresh_records = True
+        st.success("Data refresh requested")
 
 st.title("Data Dictionary Management Admin")
 st.caption("Enhanced Python-only Streamlit version with role-based upload, environment selection, audit search, create/edit, and S3 export.")
@@ -805,7 +754,12 @@ with tab_dictionary:
         "active_only": True,
         "limit": 2000,
     }
-    records = safe_filter_records(dictionary_service, dictionary_filters)
+    force_refresh_records = bool(st.session_state.pop("force_refresh_records", False))
+    records = get_cached_filter_records(
+        dictionary_service,
+        dictionary_filters,
+        force_refresh=force_refresh_records,
+    )
     search_text = filter_prj_id or filter_attribute_name or filter_attribute_description
     st.session_state.dictionary_records = records
     df = records_to_df(records, limited=True)
@@ -899,13 +853,14 @@ with tab_dictionary:
         with create_attribute_modal.container():
             st.subheader("Create New Attribute")
             st.caption("Enter master attribute details. Mandatory fields are marked with *. Use Close to dismiss; it will not reopen until you click Add New Attribute again.")
-            form_result = build_attribute_form(record=None, read_only=False, mode="CREATE")
             close_cols = st.columns([1, 5])
             with close_cols[0]:
                 if st.button("Close", key="close_create_modal"):
                     clear_popup_state()
                     create_attribute_modal.close()
-                    st.rerun()
+                    st.stop()
+
+            form_result = build_attribute_form(record=None, read_only=False, mode="CREATE")
             if form_result["submitted"]:
                 payload = form_result["record"]
                 errors = validate_attribute_payload(payload)
@@ -916,6 +871,8 @@ with tab_dictionary:
                     try:
                         result = finalization_service.create_attribute(payload, user_id=user_id)
                         st.session_state.last_result = result
+                        invalidate_dictionary_cache()
+                        st.session_state.force_refresh_records = True
                         clear_popup_state()
                         create_attribute_modal.close()
                         st.success(f"Attribute created. Batch ID: {result['batch_id']}")
@@ -948,11 +905,9 @@ with tab_dictionary:
             try:
                 result = finalization_service.soft_delete_attribute(selected_active_prj_id, user_id=user_id)
                 st.session_state.last_result = result
-                st.session_state.dictionary_records = safe_search_records(
-                    dictionary_service,
-                    term=search_text,
-                    portfolio=portfolio,
-                )
+                invalidate_dictionary_cache()
+                st.session_state.force_refresh_records = True
+                st.session_state.dictionary_records = []
                 st.session_state.selected_record = None
                 st.session_state.selected_active_prj_id = ""
                 st.success(f"Attribute soft deleted. Batch ID: {result['batch_id']}")
@@ -975,12 +930,14 @@ with tab_dictionary:
                 if st.button("Close", key="close_edit_modal"):
                     clear_popup_state()
                     edit_attribute_modal.close()
-                    st.rerun()
+                    st.stop()
             with top_cols[2]:
                 if st.button("Soft Delete", key="modal_soft_delete"):
                     try:
                         result = finalization_service.soft_delete_attribute(selected_prj_id, user_id=user_id)
                         st.session_state.last_result = result
+                        invalidate_dictionary_cache()
+                        st.session_state.force_refresh_records = True
                         clear_popup_state()
                         edit_attribute_modal.close()
                         st.success(f"Attribute soft deleted. Batch ID: {result['batch_id']}")
@@ -1004,6 +961,8 @@ with tab_dictionary:
                     try:
                         result = finalization_service.update_attribute(payload, user_id=user_id)
                         st.session_state.last_result = result
+                        invalidate_dictionary_cache()
+                        st.session_state.force_refresh_records = True
                         clear_popup_state()
                         edit_attribute_modal.close()
                         st.success(f"Attribute updated. Batch ID: {result['batch_id']}")
@@ -1059,11 +1018,9 @@ with tab_dictionary:
                 try:
                     result = finalization_service.reactivate_attribute(selected_deleted_prj_id, user_id=user_id)
                     st.session_state.last_result = result
-                    st.session_state.dictionary_records = safe_search_records(
-                        dictionary_service,
-                        term=search_text,
-                        portfolio=portfolio,
-                    )
+                    invalidate_dictionary_cache()
+                    st.session_state.force_refresh_records = True
+                    st.session_state.dictionary_records = []
                     st.session_state.show_soft_deleted = False
                     st.success(f"Attribute reactivated and moved back to active records. Batch ID: {result['batch_id']}")
                     st.rerun()
