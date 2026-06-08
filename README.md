@@ -115,13 +115,19 @@ Configure admin users in `.env`:
 ADMIN_USERS=sysuser,AMOLJ,DOMAIN\AMOLJ
 ```
 
-Only Admin users can access:
+Only configured Admin users can access:
 
 - Add New Attribute
 - Edit Attribute
 - Soft Delete
-- Upload Document
 - Save Extracts to S3
+
+The sidebar also has a **Role** dropdown with `Admin` and `User` values. The **Upload Document** section is visible only when:
+
+1. The current user has Admin permission, and
+2. The selected Role is `Admin`.
+
+When Role is `User`, the Upload Document section is hidden from the Data Dictionary page.
 
 ## S3 Export Configuration
 
@@ -203,3 +209,163 @@ On the **Data Dictionary** tab, use **View Soft Deleted Records** to display ina
 - `prj_attr_business_logic_scope`
 
 The operation writes audit and history entries with action type `REACTIVATE`.
+
+## Swagger API for Data Dictionary Filters
+
+This version includes a FastAPI/Swagger layer in addition to the Streamlit UI.
+
+Start the API in one terminal:
+
+```bash
+uvicorn app.api.swagger_app:app --host 0.0.0.0 --port 8502 --reload
+```
+
+Open Swagger:
+
+```text
+http://localhost:8502/docs
+```
+
+Start Streamlit in another terminal:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+The Streamlit filter controls call the API configured by:
+
+```env
+API_BASE_URL=http://localhost:8502/api/v1
+USE_API_FOR_FILTERS=true
+```
+
+If the API is not running, Streamlit falls back to the existing in-process service logic so add/edit/soft-delete/reactivate/S3 workflows remain usable.
+
+### Filter APIs
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/filters/options` | Returns portfolio, section, PRJ ID and attribute-name values |
+| `POST` | `/api/v1/dictionary/filter` | Fetches active master dictionary data using multi-select filters |
+| `POST` | `/api/v1/audit/filter` | Fetches audit rows using the same business filters |
+| `POST` | `/api/v1/dictionary/attributes` | Creates a new attribute and writes master + 3 target tables |
+| `PUT` | `/api/v1/dictionary/attributes/{prj_id}` | Updates an existing attribute |
+| `DELETE` | `/api/v1/dictionary/attributes/{prj_id}` | Soft deletes an attribute |
+| `POST` | `/api/v1/dictionary/attributes/{prj_id}/reactivate` | Reactivates a soft-deleted attribute |
+| `POST` | `/api/v1/s3/export` | Writes latest active extracts to S3-compatible storage |
+
+### Dictionary and Audit Filter Payload
+
+```json
+{
+  "portfolios": ["Corporates", "FI Insurance"],
+  "portfolio_sector": ["Corporates", "FI Insurance"],
+  "prj_id": "",
+  "attribute_name": "Revenue",
+  "attribute_description": "",
+  "section": "Income Statement",
+  "overlapped_attribute": true,
+  "active_only": true,
+  "limit": 2000
+}
+```
+
+Portfolio logic:
+
+| Portfolio value | DB flag |
+|---|---|
+| `Corporates` | `required_by_corporates = 1` |
+| `FI Banks` | `required_by_banks = 1` |
+| `FI Insurance` | `required_by_insurance = 1` |
+| `Zeus Downstream` | `required_by_downstream = 1` |
+| `ALL` | No portfolio filter |
+
+`Overlapped Attribute = true` returns attributes where more than one portfolio/sector flag is true.
+
+## SQL Server Authentication Modes
+
+The application now supports three SQL Server authentication modes through `.env`:
+
+| Mode | Use case |
+|---|---|
+| `windows` | Local Windows / logged-in user integrated authentication |
+| `keytab` | Enterprise Kerberos authentication using `krb5.conf` and `krb5.keytab` |
+| `sql` | SQL Server username/password authentication |
+
+### Option 1: Windows Authentication with logged-in user
+
+Use this when running locally on Windows and your Windows account has access to `PRJ_DB`.
+
+```env
+ENABLE_DB=true
+SQLSERVER_AUTH_MODE=windows
+SQLSERVER_WINDOWS_AUTH=true
+SQLSERVER_SERVER=localhost\SQLEXPRESS
+SQLSERVER_DATABASE=PRJ_DB
+SQLSERVER_DRIVER=ODBC Driver 17 for SQL Server
+SQLSERVER_TRUST_CERT=yes
+SQLSERVER_ENCRYPT=no
+```
+
+### Option 2: Kerberos keytab authentication
+
+Use this when the application runs with a service principal and other teams provide `krb5.conf` / `krb5.keytab`.
+
+```env
+ENABLE_DB=true
+SQLSERVER_AUTH_MODE=keytab
+SQLSERVER_WINDOWS_AUTH=true
+SQLSERVER_SERVER=your-sql-server-fqdn
+SQLSERVER_DATABASE=PRJ_DB
+SQLSERVER_DRIVER=ODBC Driver 17 for SQL Server
+SQLSERVER_TRUST_CERT=yes
+SQLSERVER_ENCRYPT=no
+
+KRB5_CONFIG_PATH=/app/security/krb5.conf
+KRB5_KEYTAB_PATH=/app/security/krb5.keytab
+KRB5_PRINCIPAL=svc_prj_app@YOUR.REALM.COM
+KRB5_CACHE_PATH=/tmp/krb5cc_prj_app
+KRB5_KINIT_ENABLED=true
+KRB5_KINIT_COMMAND=kinit
+
+# Usually leave blank when the driver uses the Kerberos ticket cache.
+SQLSERVER_ODBC_AUTHENTICATION=
+```
+
+When `SQLSERVER_AUTH_MODE=keytab`, the app sets:
+
+```text
+KRB5_CONFIG
+KRB5_CLIENT_KTNAME
+KRB5CCNAME
+```
+
+If `KRB5_KINIT_ENABLED=true`, it also runs:
+
+```bash
+kinit -kt /app/security/krb5.keytab svc_prj_app@YOUR.REALM.COM
+```
+
+The SQLAlchemy/pyodbc connection then uses integrated authentication with the Kerberos ticket cache.
+
+### Option 3: SQL username/password authentication
+
+```env
+ENABLE_DB=true
+SQLSERVER_AUTH_MODE=sql
+SQLSERVER_WINDOWS_AUTH=false
+SQLSERVER_SERVER=your-sql-server-name
+SQLSERVER_DATABASE=PRJ_DB
+SQLSERVER_USER=your_sql_user
+SQLSERVER_PASSWORD=your_sql_password
+SQLSERVER_DRIVER=ODBC Driver 17 for SQL Server
+```
+
+### Important deployment note for keytab mode
+
+Do not commit real `krb5.keytab` files to Git or package them into shared zips. Mount them securely at runtime, for example:
+
+```text
+/app/security/krb5.conf
+/app/security/krb5.keytab
+```
