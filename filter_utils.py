@@ -17,6 +17,31 @@ def normalize_portfolios(portfolios: list[str] | None, portfolio_sector: list[st
     return values
 
 
+def resolve_portfolio_fields(selected_portfolios: list[str]) -> list[str]:
+    """Resolve selected portfolio labels into DB fields.
+
+    Business rule for this app:
+    - ALL means no portfolio restriction.
+    - If FI Insurance is selected together with another sector, FI Insurance is
+      treated as the primary portfolio. This matches the expected business
+      behaviour where selecting FI Insurance + FI Banks should return records
+      required by FI Insurance only, not Bank-only records.
+    - For other multi-select combinations, retain OR behaviour across selected
+      sectors.
+    """
+    if not selected_portfolios or "ALL" in selected_portfolios:
+        return []
+
+    if len(selected_portfolios) > 1 and "FI Insurance" in selected_portfolios:
+        return [PORTFOLIO_FIELD_MAP["FI Insurance"]]
+
+    return [
+        PORTFOLIO_FIELD_MAP[portfolio]
+        for portfolio in selected_portfolios
+        if portfolio in PORTFOLIO_FIELD_MAP
+    ]
+
+
 def apply_dictionary_filters(
     query,
     *,
@@ -33,14 +58,13 @@ def apply_dictionary_filters(
         query = query.filter(MasterDictionary.is_active == True)  # noqa: E712
 
     selected_portfolios = normalize_portfolios(portfolios, portfolio_sector)
-    if "ALL" not in selected_portfolios:
-        portfolio_conditions = []
-        for portfolio in selected_portfolios:
-            field_name = PORTFOLIO_FIELD_MAP.get(portfolio)
-            if field_name:
-                portfolio_conditions.append(getattr(MasterDictionary, field_name) == True)  # noqa: E712
-        if portfolio_conditions:
-            query = query.filter(or_(*portfolio_conditions))
+    portfolio_fields = resolve_portfolio_fields(selected_portfolios)
+    if portfolio_fields:
+        portfolio_conditions = [
+            getattr(MasterDictionary, field_name) == True  # noqa: E712
+            for field_name in portfolio_fields
+        ]
+        query = query.filter(or_(*portfolio_conditions))
 
     if overlapped_attribute:
         # SQLAlchemy/SQL Server safe expression for counting selected sector flags.
