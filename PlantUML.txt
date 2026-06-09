@@ -1,0 +1,192 @@
+@startuml
+title Data Dictionary Admin App - End-to-End Flow
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor #F7F7F7
+  BorderColor #333333
+  FontSize 13
+}
+skinparam note {
+  BackgroundColor #FFF7E6
+  BorderColor #999999
+}
+
+start
+
+:User opens Streamlit UI;
+note right
+http://localhost:8501
+end note
+
+:Sidebar loads configuration;
+note right
+Environment
+Role
+Database
+Current User
+end note
+
+if (Role = Admin?) then (Yes)
+  :Show Admin actions;
+  note right
+Add New Attribute
+View/Edit
+Soft Delete
+Upload Document
+Save Extracts to S3
+Reactivate Record
+end note
+else (No)
+  :Show read-only user view;
+  note right
+Filter and view
+Data Dictionary only
+end note
+endif
+
+partition "Data Dictionary Flow" {
+
+  :Open Data Dictionary tab;
+
+  :User selects filters;
+  note right
+Portfolio
+PRJ_ID
+Attribute Name
+Attribute Description
+Section
+Overlapped Attribute
+end note
+
+  if (USE_API_FOR_FILTERS = true?) then (Yes)
+    :Call FastAPI Filter API;
+    note right
+POST
+/api/v1/dictionary/filter
+
+API Port: 8502
+end note
+  else (No / Fallback)
+    :Call local Dictionary Service;
+  endif
+
+  :Repository builds SQLAlchemy query;
+
+  :Fetch filtered records from SQL Server;
+  note right
+Database: PRJ_DB
+Table: master_dictionary
+Only active records
+end note
+
+  :Display records in Streamlit grid;
+
+  if (User action?) then (Add New Attribute)
+    :Open Create Attribute popup;
+    :Validate mandatory fields;
+    note right
+PRJ_ID
+Attribute Name
+Section
+end note
+    :Call Finalization Service;
+
+  elseif (View/Edit)
+    :Select row from grid;
+    :Open Edit Attribute popup;
+    :Open in read-only mode;
+    :User clicks Edit;
+    :Fields become editable except PRJ_ID;
+    :Call Finalization Service;
+
+  elseif (Soft Delete)
+    :Select row from grid;
+    :Set is_active = 0;
+    note right
+master_dictionary
+prj_attribute
+prj_attr_business_logic
+prj_attr_business_logic_scope
+end note
+
+  elseif (Reactivate)
+    :View soft-deleted records;
+    :Select inactive row from grid;
+    :Click Activate Record;
+    :Set is_active = 1;
+    note right
+master_dictionary
+prj_attribute
+prj_attr_business_logic
+prj_attr_business_logic_scope
+end note
+
+  elseif (Save to S3)
+    :Fetch latest active data from 4 tables;
+    :Create timestamped CSV files;
+    :Upload files to internal S3 bucket;
+    note right
+boto3 upload_file
+endpoint_url = HOST
+use_ssl = False
+verify = False
+end note
+  endif
+
+  :Write / update target tables;
+  note right
+master_dictionary
+prj_attribute
+prj_attr_business_logic
+prj_attr_business_logic_scope
+end note
+
+  :Write audit and history;
+  note right
+audit_log
+history_log
+User
+Timestamp
+Action Type
+Old Value
+New Value
+end note
+
+  :Clear Streamlit cache;
+  :Refresh main grid;
+}
+
+partition "Audit History Flow" {
+  :Open Audit History tab;
+  :Apply audit filters;
+  note right
+Portfolio
+PRJ_ID
+Attribute Name
+Attribute Description
+Section
+Overlapped Attribute
+end note
+
+  :Call FastAPI Audit API;
+  :Fetch audit history from DB;
+  note right
+audit_log
+master_dictionary
+end note
+
+  :Display audit history grid;
+}
+
+partition "Prompts Library Flow" {
+  :Open Prompts Library tab;
+  :Fetch prompt_library records;
+  :Display prompts in read-only mode;
+}
+
+stop
+
+@enduml
