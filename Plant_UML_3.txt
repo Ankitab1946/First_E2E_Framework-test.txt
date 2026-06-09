@@ -1,0 +1,83 @@
+@startuml
+title Data Dictionary Admin App - Simplified Flow
+
+left to right direction
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam roundcorner 12
+skinparam ArrowColor #4A4A4A
+
+skinparam rectangle {
+  BorderColor #4A4A4A
+  FontColor #1F1F1F
+}
+
+skinparam database {
+  BackgroundColor #EFE7F6
+  BorderColor #4A4A4A
+}
+
+actor User
+
+rectangle "Streamlit UI\nlocalhost:8501" as UI #EAF3FF {
+  rectangle "Sidebar\nEnvironment + Role + User" as SIDE #D9EAF7
+  rectangle "Data Dictionary\nFilters + Grid" as DD #D9EAF7
+  rectangle "Create / Edit Popup" as POPUP #FCE4D6
+  rectangle "Audit History" as AUDIT_UI #D9EAF7
+  rectangle "Prompts Library" as PROMPT_UI #D9EAF7
+}
+
+rectangle "FastAPI / Swagger API\nlocalhost:8502" as API #FFF2CC {
+  rectangle "Filter API" as FILTER_API #FFE699
+  rectangle "Create / Update / Delete API" as CRUD_API #FFE699
+  rectangle "Audit API" as AUDIT_API #FFE699
+}
+
+rectangle "Python Business Services" as SERVICES #E2F0D9 {
+  rectangle "Dictionary Service" as DICT_SVC #C6E0B4
+  rectangle "Finalization Service" as FINAL_SVC #C6E0B4
+  rectangle "S3 Export Service" as S3_SVC #C6E0B4
+}
+
+database "SQL Server PRJ_DB\n\nmaster_dictionary\nprj_attribute\nprj_attr_business_logic\nprj_attr_business_logic_scope\naudit_log\nhistory_log\nprompt_library" as DB
+
+cloud "Internal S3 Bucket\nCSV Extracts" as S3 #E2F0F9
+
+User --> SIDE
+SIDE --> DD
+SIDE --> AUDIT_UI
+SIDE --> PROMPT_UI
+
+DD --> FILTER_API : Apply filters
+FILTER_API --> DICT_SVC
+DICT_SVC --> DB : Fetch active records
+DB --> DD : Show filtered grid
+
+DD --> POPUP : Add / View / Edit record
+POPUP --> CRUD_API : Save changes
+CRUD_API --> FINAL_SVC
+FINAL_SVC --> DB : Insert / Update / Soft Delete / Reactivate
+FINAL_SVC --> DB : Write audit + history
+DB --> DD : Refresh grid
+
+DD --> S3_SVC : Save Extracts to S3
+S3_SVC --> DB : Read latest data from 4 tables
+S3_SVC --> S3 : Upload timestamped CSV files
+
+AUDIT_UI --> AUDIT_API : Search audit history
+AUDIT_API --> DB : Fetch audit records
+DB --> AUDIT_UI : Show audit grid
+
+PROMPT_UI --> DB : Read prompts
+DB --> PROMPT_UI : Show read-only prompts
+
+note bottom of DD
+Grid refresh happens after:
+filter change, add, edit,
+soft delete, reactivate, or manual refresh.
+end note
+
+@enduml
