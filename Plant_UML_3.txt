@@ -1,136 +1,223 @@
 @startuml
 title Data Dictionary Admin App - End-to-End Flow
 
-left to right direction
-
 skinparam backgroundColor white
 skinparam shadowing false
 skinparam defaultFontName Arial
-skinparam defaultFontSize 11
+skinparam defaultFontSize 12
 skinparam ArrowColor #4A4A4A
 skinparam ArrowThickness 1.2
 skinparam roundcorner 12
 
-skinparam rectangle {
-  BorderColor #4A4A4A
+skinparam activity {
+  BackgroundColor #EAF3FF
+  BorderColor #2F5597
+  FontColor #1F1F1F
+  FontSize 13
+}
+
+skinparam note {
+  BackgroundColor #FFF7E6
+  BorderColor #BF9000
   FontColor #1F1F1F
 }
 
-skinparam database {
-  BorderColor #4A4A4A
-  BackgroundColor #EFE7F6
-}
-
-skinparam package {
-  BorderColor #777777
+skinparam partition {
+  BackgroundColor #F8F9FA
+  BorderColor #7F7F7F
+  FontColor #1F1F1F
   FontStyle bold
-  BackgroundColor #FFFFFF
 }
 
-legend right
-  <b>Runtime</b>
-  Streamlit UI : 8501
-  FastAPI API : 8502
-  Database : SQL Server PRJ_DB
-  Export : Internal S3-compatible bucket
-endlegend
-
-rectangle "User" as USER #FFFFFF
-
-package "Presentation Layer\nStreamlit UI - localhost:8501" #EAF3FF {
-  rectangle "Sidebar\nEnvironment\nRole\nDB\nCurrent User" as SIDEBAR #D9EAF7
-  rectangle "Data Dictionary Tab\nFilters + Grid" as UI_DD #D9EAF7
-  rectangle "Audit History Tab" as UI_AUDIT #D9EAF7
-  rectangle "Prompts Library Tab" as UI_PROMPT #D9EAF7
-  rectangle "Create / Edit Popup\nRead-only first\nPRJ_ID not editable" as MODAL #FCE4D6
+skinparam diamond {
+  BackgroundColor #FCE4D6
+  BorderColor #C65911
+  FontColor #1F1F1F
 }
 
-package "API Layer\nFastAPI Swagger - localhost:8502" #FFF2CC {
-  rectangle "Dictionary Filter API\n/api/v1/dictionary/filter" as API_FILTER #FFE699
-  rectangle "CRUD APIs\nCreate / Update\nSoft Delete / Reactivate" as API_CRUD #FFE699
-  rectangle "Audit Filter API\n/api/v1/audit/filter" as API_AUDIT #FFE699
+skinparam start {
+  BackgroundColor #70AD47
+  BorderColor #548235
 }
 
-package "Business Logic Layer" #E2F0D9 {
-  rectangle "Dictionary Service\nFilter orchestration\nAPI fallback support" as SVC_DICT #C6E0B4
-  rectangle "Finalization Service\nValidate + Transaction" as SVC_FINAL #C6E0B4
-  rectangle "Audit / History Service\nOld value + New value\nUser + Timestamp" as SVC_AUDIT #C6E0B4
-  rectangle "S3 Export Service\nCSV generation\nboto3 upload_file" as SVC_S3 #C6E0B4
+skinparam end {
+  BackgroundColor #C00000
+  BorderColor #7F0000
 }
 
-package "Repository Layer" #EDEDED {
-  rectangle "Dictionary Repository\nSQLAlchemy queries" as REPO_DICT #D9D9D9
-  rectangle "Target Repository\nMaster to 3 target tables" as REPO_TARGET #D9D9D9
-  rectangle "Audit Repository\nAudit search" as REPO_AUDIT #D9D9D9
-}
+start
 
-package "Data Layer\nSQL Server PRJ_DB" #EFE7F6 {
-  database "master_dictionary" as DB_MASTER
-  database "prj_attribute" as DB_ATTR
-  database "prj_attr_business_logic" as DB_LOGIC
-  database "prj_attr_business_logic_scope" as DB_SCOPE
-  database "audit_log" as DB_AUDIT
-  database "history_log" as DB_HISTORY
-  database "prompt_library" as DB_PROMPT
-}
-
-cloud "Internal S3-Compatible Bucket\nendpoint_url = HOST\nuse_ssl = False\nverify = False" as S3 #E2F0F9
-
-USER --> SIDEBAR
-SIDEBAR --> UI_DD
-SIDEBAR --> UI_AUDIT
-SIDEBAR --> UI_PROMPT
-
-UI_DD --> API_FILTER : User selects filters\nPortfolio, PRJ_ID,\nAttribute, Section,\nOverlapped Attribute
-API_FILTER --> SVC_DICT
-SVC_DICT --> REPO_DICT
-REPO_DICT --> DB_MASTER
-DB_MASTER --> UI_DD : Filtered active records\nshown in grid
-
-UI_DD --> MODAL : Add New Attribute\nor View/Edit selected row
-MODAL --> API_CRUD : Create / Update
-API_CRUD --> SVC_FINAL
-SVC_FINAL --> REPO_DICT
-SVC_FINAL --> REPO_TARGET
-
-REPO_DICT --> DB_MASTER : Insert / Update\nSoft Delete / Reactivate
-REPO_TARGET --> DB_ATTR
-REPO_TARGET --> DB_LOGIC
-REPO_TARGET --> DB_SCOPE
-
-SVC_FINAL --> SVC_AUDIT
-SVC_AUDIT --> DB_AUDIT
-SVC_AUDIT --> DB_HISTORY
-
-UI_DD --> API_CRUD : Soft Delete selected row
-UI_DD --> API_CRUD : Activate soft-deleted row
-
-UI_DD --> SVC_S3 : Save Extracts to S3
-SVC_S3 --> DB_MASTER
-SVC_S3 --> DB_ATTR
-SVC_S3 --> DB_LOGIC
-SVC_S3 --> DB_SCOPE
-SVC_S3 --> S3 : Upload 4 timestamped CSV files
-
-UI_AUDIT --> API_AUDIT : Audit filters
-API_AUDIT --> REPO_AUDIT
-REPO_AUDIT --> DB_AUDIT
-REPO_AUDIT --> DB_MASTER
-DB_AUDIT --> UI_AUDIT : Audit history grid
-
-UI_PROMPT --> DB_PROMPT : Read-only prompt view
-
-note bottom of UI_DD
-Performance:
-Session cache prevents unnecessary reloads.
-Grid refresh happens only after filter change,
-manual refresh, insert, update, soft delete, or reactivate.
+:User opens Streamlit UI;
+note right
+http://localhost:8501
 end note
 
-note bottom of SVC_FINAL
-Transaction:
-One business action updates master,
-three target tables, audit, and history.
+:Sidebar loads configuration;
+note right
+Environment
+Role
+Database
+Current User
 end note
+
+if (Role = Admin?) then (Yes)
+  #E2F0D9:Show Admin actions;
+  note right
+Add New Attribute
+View/Edit
+Soft Delete
+Upload Document
+Save Extracts to S3
+Reactivate Record
+end note
+else (No)
+  #D9EAF7:Show read-only user view;
+  note right
+Filter and view
+Data Dictionary only
+end note
+endif
+
+partition "Data Dictionary Flow" #EAF3FF {
+
+  #D9EAF7:Open Data Dictionary tab;
+
+  #D9EAF7:User selects filters;
+  note right
+Portfolio
+PRJ_ID
+Attribute Name
+Attribute Description
+Section
+Overlapped Attribute
+end note
+
+  if (USE_API_FOR_FILTERS = true?) then (Yes)
+    #FFF2CC:Call FastAPI Filter API;
+    note right
+POST
+/api/v1/dictionary/filter
+
+API Port: 8502
+end note
+  else (No / Fallback)
+    #FFF2CC:Call local Dictionary Service;
+  endif
+
+  #E2F0D9:Repository builds SQLAlchemy query;
+
+  #EDEDED:Fetch filtered records from SQL Server;
+  note right
+Database: PRJ_DB
+Table: master_dictionary
+Only active records
+end note
+
+  #D9EAF7:Display records in Streamlit grid;
+
+  if (User action?) then (Add New Attribute)
+    #FCE4D6:Open Create Attribute popup;
+    #FCE4D6:Validate mandatory fields;
+    note right
+PRJ_ID
+Attribute Name
+Section
+end note
+    #E2F0D9:Call Finalization Service;
+
+  elseif (View/Edit)
+    #D9EAF7:Select row from grid;
+    #FCE4D6:Open Edit Attribute popup;
+    #FCE4D6:Open in read-only mode;
+    #FCE4D6:User clicks Edit;
+    #FCE4D6:Fields become editable except PRJ_ID;
+    #E2F0D9:Call Finalization Service;
+
+  elseif (Soft Delete)
+    #D9EAF7:Select row from grid;
+    #F4CCCC:Set is_active = 0;
+    note right
+master_dictionary
+prj_attribute
+prj_attr_business_logic
+prj_attr_business_logic_scope
+end note
+
+  elseif (Reactivate)
+    #D9EAF7:View soft-deleted records;
+    #D9EAF7:Select inactive row from grid;
+    #E2F0D9:Click Activate Record;
+    #E2F0D9:Set is_active = 1;
+    note right
+master_dictionary
+prj_attribute
+prj_attr_business_logic
+prj_attr_business_logic_scope
+end note
+
+  elseif (Save to S3)
+    #E2F0F9:Fetch latest active data from 4 tables;
+    #E2F0F9:Create timestamped CSV files;
+    #E2F0F9:Upload files to internal S3 bucket;
+    note right
+boto3 upload_file
+endpoint_url = HOST
+use_ssl = False
+verify = False
+end note
+  endif
+
+  #E2F0D9:Write / update target tables;
+  note right
+master_dictionary
+prj_attribute
+prj_attr_business_logic
+prj_attr_business_logic_scope
+end note
+
+  #E2F0D9:Write audit and history;
+  note right
+audit_log
+history_log
+User
+Timestamp
+Action Type
+Old Value
+New Value
+end note
+
+  #EDEDED:Clear Streamlit cache;
+  #D9EAF7:Refresh main grid;
+}
+
+partition "Audit History Flow" #FFF2CC {
+  #D9EAF7:Open Audit History tab;
+  #D9EAF7:Apply audit filters;
+  note right
+Portfolio
+PRJ_ID
+Attribute Name
+Attribute Description
+Section
+Overlapped Attribute
+end note
+
+  #FFF2CC:Call FastAPI Audit API;
+  #EDEDED:Fetch audit history from DB;
+  note right
+audit_log
+master_dictionary
+end note
+
+  #D9EAF7:Display audit history grid;
+}
+
+partition "Prompts Library Flow" #E2F0D9 {
+  #D9EAF7:Open Prompts Library tab;
+  #EDEDED:Fetch prompt_library records;
+  #D9EAF7:Display prompts in read-only mode;
+}
+
+stop
 
 @enduml
