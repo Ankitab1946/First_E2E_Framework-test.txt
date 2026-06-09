@@ -79,7 +79,9 @@ class DictionaryService:
         selected_portfolios = normalize_portfolios(filters.get("portfolios"), filters.get("portfolio_sector"))
         selected_fields = resolve_portfolio_fields(selected_portfolios)
         if selected_fields:
-            records = [r for r in records if any(bool(r.get(f)) for f in selected_fields)]
+            # Multi-select portfolio filtering is intersection/AND.
+            # Example: FI Banks + FI Insurance returns only records required by both.
+            records = [r for r in records if all(bool(r.get(f)) for f in selected_fields)]
         if filters.get("overlapped_attribute"):
             sector_fields = list(PORTFOLIO_FIELD_MAP.values())
             records = [r for r in records if sum(1 for f in sector_fields if bool(r.get(f))) > 1]
