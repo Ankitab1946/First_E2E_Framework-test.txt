@@ -20,20 +20,17 @@ def normalize_portfolios(portfolios: list[str] | None, portfolio_sector: list[st
 def resolve_portfolio_fields(selected_portfolios: list[str]) -> list[str]:
     """Resolve selected portfolio labels into DB fields.
 
-    Business rule for this app:
+    Business rule:
     - ALL means no portfolio restriction.
-    - If FI Insurance is selected together with another sector, FI Insurance is
-      treated as the primary portfolio. This matches the expected business
-      behaviour where selecting FI Insurance + FI Banks should return records
-      required by FI Insurance only, not Bank-only records.
-    - For other multi-select combinations, retain OR behaviour across selected
-      sectors.
+    - A single portfolio means records where that portfolio flag is true.
+    - Multiple selected portfolios mean intersection/AND across selected flags.
+
+    Example:
+    Selecting FI Insurance + FI Banks should return only records where both
+    required_by_insurance = true and required_by_banks = true.
     """
     if not selected_portfolios or "ALL" in selected_portfolios:
         return []
-
-    if len(selected_portfolios) > 1 and "FI Insurance" in selected_portfolios:
-        return [PORTFOLIO_FIELD_MAP["FI Insurance"]]
 
     return [
         PORTFOLIO_FIELD_MAP[portfolio]
@@ -64,7 +61,9 @@ def apply_dictionary_filters(
             getattr(MasterDictionary, field_name) == True  # noqa: E712
             for field_name in portfolio_fields
         ]
-        query = query.filter(or_(*portfolio_conditions))
+        # Multi-select portfolio filtering is intersection/AND.
+        # Example: FI Banks + FI Insurance returns only records required by both.
+        query = query.filter(and_(*portfolio_conditions))
 
     if overlapped_attribute:
         # SQLAlchemy/SQL Server safe expression for counting selected sector flags.
