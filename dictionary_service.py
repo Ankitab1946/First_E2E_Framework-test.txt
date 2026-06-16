@@ -59,6 +59,29 @@ class DictionaryService:
         with SessionLocal() as db:
             return self.repository.filter_records(db, filters)
 
+
+    def generate_next_prj_id(self) -> str:
+        """Return the next available PRJ ID for Create New Attribute screens."""
+        if not self.settings.enable_db:
+            records = get_sample_records()
+            return self._generate_next_prj_id_from_values([r.get("prj_id") for r in records])
+        SessionLocal = get_session_factory()
+        with SessionLocal() as db:
+            return self.repository.get_next_prj_id(db)
+
+    @staticmethod
+    def _generate_next_prj_id_from_values(values: list[str | None], prefix: str = "PRJ", width: int = 3) -> str:
+        max_number = 0
+        normalized_prefix = (prefix or "PRJ").strip().upper()
+        for raw_value in values:
+            value = str(raw_value or "").strip().upper()
+            if not value.startswith(normalized_prefix):
+                continue
+            suffix = value[len(normalized_prefix):]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+        return f"{normalized_prefix}{max_number + 1:0{width}d}"
+
     def get_filter_options(self) -> dict:
         if not self.settings.enable_db:
             records = get_sample_records()
