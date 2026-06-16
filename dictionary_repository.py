@@ -1,6 +1,7 @@
-from sqlalchemy import or_
+from sqlalchemy import or_, distinct
 from sqlalchemy.orm import Session
 from app.models.master_dictionary import MasterDictionary
+from app.repositories.filter_utils import apply_dictionary_filters
 from app.utils.constants import PORTFOLIO_FIELD_MAP
 from app.utils.excel_mapping import MASTER_FIELDS
 
@@ -37,6 +38,61 @@ class DictionaryRepository:
                 )
             )
         return [self.to_dict(row) for row in query.all()]
+
+
+    def filter_records(self, db: Session, filters: dict) -> list[dict]:
+        query = db.query(MasterDictionary)
+        query = apply_dictionary_filters(
+            query,
+            portfolios=filters.get("portfolios"),
+            portfolio_sector=filters.get("portfolio_sector"),
+            prj_id=filters.get("prj_id", ""),
+            attribute_name=filters.get("attribute_name", ""),
+            attribute_description=filters.get("attribute_description", ""),
+            section=filters.get("section", ""),
+            overlapped_attribute=bool(filters.get("overlapped_attribute", False)),
+            active_only=bool(filters.get("active_only", True)),
+        )
+        limit = int(filters.get("limit") or 2000)
+        return [self.to_dict(row) for row in query.order_by(MasterDictionary.prj_id).limit(limit).all()]
+
+
+    def get_next_prj_id(self, db: Session, prefix: str = "PRJ", width: int = 3) -> str:
+        """Generate the next unique PRJ ID from values already stored in DB.
+
+        Existing IDs such as PRJ001, PRJ002 produce PRJ003. If the table
+        contains mixed formats, the largest numeric suffix for the selected
+        prefix is used and the configured width is preserved as a minimum.
+        """
+        rows = db.query(MasterDictionary.prj_id).all()
+        max_number = 0
+        normalized_prefix = (prefix or "PRJ").strip().upper()
+        for row in rows:
+            value = str(row[0] or "").strip().upper()
+            if not value.startswith(normalized_prefix):
+                continue
+            suffix = value[len(normalized_prefix):]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+
+        next_number = max_number + 1
+        while True:
+            candidate = f"{normalized_prefix}{next_number:0{width}d}"
+            if self.get_by_prj_id(db, candidate) is None:
+                return candidate
+            next_number += 1
+
+    def get_distinct_prj_ids(self, db: Session) -> list[str]:
+        rows = db.query(MasterDictionary.prj_id).order_by(MasterDictionary.prj_id).all()
+        return [row[0] for row in rows if row[0]]
+
+    def get_distinct_attribute_names(self, db: Session) -> list[str]:
+        rows = db.query(distinct(MasterDictionary.prj_attribute_name)).order_by(MasterDictionary.prj_attribute_name).all()
+        return [row[0] for row in rows if row[0]]
+
+    def get_distinct_sections(self, db: Session) -> list[str]:
+        rows = db.query(distinct(MasterDictionary.where_in_financial_statement)).order_by(MasterDictionary.where_in_financial_statement).all()
+        return [row[0] for row in rows if row[0]]
 
     def upsert_master(self, db: Session, record: dict, user_id: str) -> str:
         existing = self.get_by_prj_id(db, record["prj_id"])
