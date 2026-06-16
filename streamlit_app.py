@@ -418,9 +418,14 @@ def build_attribute_form(
     )
 
     with st.form(f"{mode.lower()}_attribute_form_{'readonly' if read_only else 'editable'}"):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            prj_id = st.text_input("PRJ ID *", value=str(prj_id_value or ""), disabled=disabled_prj, key=f"{key_prefix}_prj_id")
+        if is_create_mode:
+            # PRJ ID is generated server-side and intentionally hidden on Create New Attribute screens.
+            prj_id = str(prj_id_value or "")
+            c2, c3 = st.columns(2)
+        else:
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                prj_id = st.text_input("PRJ ID *", value=str(prj_id_value or ""), disabled=disabled_prj, key=f"{key_prefix}_prj_id")
         with c2:
             prj_attribute_name = st.text_input(
                 "Attribute Name *",
@@ -660,8 +665,9 @@ def render_create_attribute_page(dictionary_service: DictionaryService, finaliza
         else:
             try:
                 result = finalization_service.create_attribute(payload, user_id=user_id)
+                result = {**result, "created_prj_id": generated_prj_id}
                 clear_generated_create_prj_id("page")
-                st.success(f"Attribute created. Batch ID: {result['batch_id']}")
+                st.success(f"Attribute created successfully. PRJ ID created: {generated_prj_id}. Batch ID: {result['batch_id']}")
                 st.json(result)
             except Exception as exc:
                 reset_create_submit_state("page")
@@ -963,12 +969,11 @@ with tab_dictionary:
                 else:
                     try:
                         result = finalization_service.create_attribute(payload, user_id=user_id)
-                        st.session_state.last_result = result
+                        st.session_state.last_result = {**result, "created_prj_id": generated_prj_id}
                         invalidate_dictionary_cache()
                         st.session_state.force_refresh_records = True
                         clear_popup_state()
                         create_attribute_modal.close()
-                        st.success(f"Attribute created. Batch ID: {result['batch_id']}")
                         st.rerun()
                     except Exception as exc:
                         reset_create_submit_state("modal")
@@ -1124,6 +1129,9 @@ with tab_dictionary:
             st.info("No soft deleted records found. With ENABLE_DB=false this list remains empty because no DB state exists.")
 
     if st.session_state.last_result:
+        created_prj_id = st.session_state.last_result.get("created_prj_id") if isinstance(st.session_state.last_result, dict) else None
+        if created_prj_id:
+            st.success(f"Attribute created successfully. PRJ ID created: {created_prj_id}. Batch ID: {st.session_state.last_result.get('batch_id', '')}")
         with st.expander("Last DB Operation Result", expanded=False):
             st.json(st.session_state.last_result)
 
