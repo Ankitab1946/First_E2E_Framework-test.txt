@@ -63,6 +63,8 @@ class FinalizationService:
         delta_type = record.get("delta_type", "UPDATED")
         prj_id = record["prj_id"]
         existing = self.dictionary_repo.get_by_prj_id(db, prj_id)
+        if delta_type == "NEW" and existing is not None:
+            raise ValueError(f"PRJ ID already exists: {prj_id}. Refresh Create New Attribute to generate a new PRJ ID.")
         old_value = self.dictionary_repo.to_dict(existing) if existing else None
 
         self.audit_repo.log_history(
