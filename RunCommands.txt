@@ -1,0 +1,12 @@
+poetry install
+cp etc/.env.example .env
+mkdir -p .streamlit
+cp etc/streamlit/config.toml .streamlit/config.toml
+poetry run streamlit run src/streamlit_app.py
+
+API
+
+poetry run uvicorn app.api.swagger_app:app --host 0.0.0.0 --port 8502 --reload
+
+Test 
+poetry run pytest
