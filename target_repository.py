@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from app.models.target_tables import PrjAttribute, PrjAttrBusinessLogic, PrjAttrBusinessLogicScope
+from DataDictionaryAdminApp.model.target_tables import PrjAttribute, PrjAttrBusinessLogic, PrjAttrBusinessLogicScope
 
 
 class TargetRepository:
@@ -13,6 +13,10 @@ class TargetRepository:
             entity = db.query(model).filter(model.prj_id == prj_id).one_or_none()
             if entity:
                 entity.is_active = False
+                entity.is_deleted = True
+                from datetime import datetime, timezone
+                entity.deleted_at = datetime.now(timezone.utc)
+                entity.deleted_by = user_id
                 entity.updated_by = user_id
                 entity.version_no = (entity.version_no or 1) + 1
 
@@ -21,6 +25,9 @@ class TargetRepository:
             entity = db.query(model).filter(model.prj_id == prj_id).one_or_none()
             if entity:
                 entity.is_active = True
+                entity.is_deleted = False
+                entity.deleted_at = None
+                entity.deleted_by = None
                 entity.updated_by = user_id
                 entity.version_no = (entity.version_no or 1) + 1
 
@@ -34,7 +41,7 @@ class TargetRepository:
             "where_in_financial_statement": record.get("where_in_financial_statement"),
             "version_update": record.get("version_update"),
             "updated_by": user_id,
-            "is_active": True,
+            "is_active": True, "is_deleted": False, "deleted_at": None, "deleted_by": None,
         }
         if entity is None:
             entity = PrjAttribute(**values, created_by=user_id)
