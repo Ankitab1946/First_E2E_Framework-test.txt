@@ -8,16 +8,17 @@ import pandas as pd
 import streamlit as st
 from streamlit_modal import Modal
 
-from app.core.config import get_settings
-from app.core.database import reset_database_cache
-from app.services.audit_service import AuditService
-from app.services.dictionary_service import DictionaryService
-from app.services.excel_service import ExcelService
-from app.services.finalization_service import FinalizationService
-from app.services.s3_export_service import S3ExportService
-from app.utils.constants import LIMITED_DICTIONARY_FIELDS, PORTFOLIO_OPTIONS, SECTION_OPTIONS
-from app.utils.excel_mapping import BOOLEAN_FIELDS, MASTER_FIELDS
-from app.utils.sample_data import get_sample_records
+from DataDictionaryAdminApp.config import get_settings
+from DataDictionaryAdminApp.core.database import reset_database_cache
+from DataDictionaryAdminApp.service.audit_service import AuditService
+from DataDictionaryAdminApp.service.dictionary_service import DictionaryService
+from DataDictionaryAdminApp.service.excel_service import ExcelService
+from DataDictionaryAdminApp.service.finalization_service import FinalizationService
+from DataDictionaryAdminApp.service.s3_export_service import S3ExportService
+from DataDictionaryAdminApp.service.configuration_service import ConfigurationService
+from DataDictionaryAdminApp.utils.constants import LIMITED_DICTIONARY_FIELDS, PORTFOLIO_OPTIONS, SECTION_OPTIONS
+from DataDictionaryAdminApp.utils.excel_mapping import BOOLEAN_FIELDS, MASTER_FIELDS
+from DataDictionaryAdminApp.utils.sample_data import get_sample_records
 
 
 st.set_page_config(page_title="Data Dictionary Admin", layout="wide", initial_sidebar_state="expanded")
@@ -797,7 +798,7 @@ if not admin:
 elif st.session_state.get("selected_user_role") != "Admin":
     st.info("Role is set to User. Upload Document section is hidden. Switch Role to Admin to view Upload Document.")
 
-tab_dictionary, tab_audit, tab_prompts = st.tabs(["Data Dictionary", "Audit History", "Prompts Library"])
+tab_dictionary, tab_ui_display, tab_business_rules, tab_prompts, tab_audit = st.tabs(["Data Dictionary", "UI Display Configuration", "Business Rules", "Prompt Management", "Audit History"])
 
 with tab_dictionary:
     st.header("Data Dictionary")
@@ -1135,6 +1136,107 @@ with tab_dictionary:
         with st.expander("Last DB Operation Result", expanded=False):
             st.json(st.session_state.last_result)
 
+with tab_ui_display:
+    st.header("UI Display Configuration")
+    st.caption("Manage active and soft-deleted UI display records. Saving an existing record reactivates it.")
+    config_service = ConfigurationService()
+    show_deleted_display = st.checkbox("Show soft-deleted UI display records", key="show_deleted_display")
+    try:
+        display_rows = config_service.list_displays(active_only=not show_deleted_display)
+        if display_rows:
+            display_df = pd.DataFrame(display_rows)
+            st.dataframe(display_df, use_container_width=True, height=320)
+            display_ids = display_df["display_id"].astype(str).tolist()
+            selected_display_id = st.selectbox("Select Display ID for edit/delete/reactivate", [""] + display_ids, key="selected_display_id")
+            selected_display = next((r for r in display_rows if str(r.get("display_id")) == selected_display_id), None)
+        else:
+            selected_display = None
+            st.info("No UI display configuration records found.")
+    except Exception as exc:
+        display_rows, selected_display = [], None
+        st.error(f"Could not load display configuration: {exc}")
+
+    with st.form("ui_display_config_form"):
+        c1, c2, c3 = st.columns(3)
+        prj_id = c1.text_input("PRJ ID", value="", key="cfg_display_prj_id")
+        sector = c2.selectbox("Sector", ["Corporates", "Banks", "Insurance", "SnP"], key="cfg_display_sector")
+        display_order = c3.number_input("Display Order", min_value=0, step=1, value=int(selected_display.get("display_order") or 0) if selected_display else 0, key="cfg_display_order")
+        display_name = st.text_input("Display Name", value=(selected_display.get("display_name") or "") if selected_display else "", key="cfg_display_name")
+        section = st.text_input("Section", value=(selected_display.get("section") or "") if selected_display else "", key="cfg_display_section")
+        subsection = st.text_input("Subsection", value=(selected_display.get("subsection") or "") if selected_display else "", key="cfg_display_subsection")
+        view_name = st.text_input("View Name", value=(selected_display.get("view_name") or "") if selected_display else "", key="cfg_display_view_name")
+        description = st.text_area("Description", value=(selected_display.get("description") or "") if selected_display else "", key="cfg_display_description")
+        if st.form_submit_button("Save / Update UI Display Configuration"):
+            try:
+                result = config_service.save_display({"display_id": int(selected_display_id) if selected_display_id else None, "prj_id": prj_id, "sector": sector, "display_order": display_order, "display_name": display_name, "section": section, "subsection": subsection, "view_name": view_name, "description": description}, user_id)
+                st.success(f"Saved display configuration {result.get('display_id', '')}")
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+    if selected_display:
+        d1, d2 = st.columns(2)
+        if not bool(selected_display.get("is_deleted")):
+            if d1.button("Soft Delete Selected Display", key="delete_selected_display"):
+                try:
+                    config_service.soft_delete_display(int(selected_display_id), user_id)
+                    st.success("UI display configuration soft deleted.")
+                    st.rerun()
+                except Exception as exc: st.error(str(exc))
+        else:
+            if d2.button("Reactivate Selected Display", key="reactivate_selected_display"):
+                try:
+                    config_service.reactivate_display(int(selected_display_id), user_id)
+                    st.success("UI display configuration reactivated.")
+                    st.rerun()
+                except Exception as exc: st.error(str(exc))
+
+with tab_business_rules:
+    st.header("Business Rules")
+    st.caption("Business rules support update, soft delete and reactivation per scope.")
+    config_service = ConfigurationService()
+    show_deleted_rules = st.checkbox("Show soft-deleted business rules", key="show_deleted_rules")
+    try:
+        rule_rows = config_service.list_rules(active_only=not show_deleted_rules)
+        if rule_rows:
+            rule_df = pd.DataFrame(rule_rows)
+            st.dataframe(rule_df, use_container_width=True, height=260)
+            selected_rule_id = st.selectbox("Select Rule ID for delete/reactivate", [""] + rule_df["id"].astype(str).tolist(), key="selected_rule_id")
+            selected_rule = next((r for r in rule_rows if str(r.get("id")) == selected_rule_id), None)
+        else:
+            selected_rule_id, selected_rule = "", None
+            st.info("No business rules found.")
+    except Exception as exc:
+        selected_rule_id, selected_rule = "", None
+        st.error(f"Could not load business rules: {exc}")
+    with st.form("business_rule_form"):
+        c1,c2,c3=st.columns(3)
+        prj_id=c1.text_input("PRJ ID", key="rule_prj_id")
+        sector=c2.selectbox("Sector", ["Corporates", "Banks", "Insurance", "SnP"], key="rule_sector")
+        source=c3.text_input("Source", value="SNPAR", key="rule_source")
+        editable=st.checkbox("Editable?", key="rule_editable")
+        symbol=st.text_input("Percentage / Ratio", key="rule_symbol")
+        mapping_type=st.text_input("Mapping Type", key="rule_mapping_type")
+        mapping_logic=st.text_area("Calculation in PRJ", key="rule_mapping_logic")
+        calculation_logic=st.text_area("Calculation Logic Details", key="rule_calculation_logic")
+        business_logic=st.text_area("Business Logic", key="rule_business_logic")
+        if st.form_submit_button("Save Business Rule"):
+            try:
+                config_service.save_rule({"prj_id":prj_id,"sector":sector,"source_abbr_name":source,"editable":editable,"symbol":symbol,"mapping_type":mapping_type,"mapping_logic":mapping_logic,"calculation_logic":calculation_logic,"business_logic":business_logic}, user_id)
+                st.success("Business rule saved.")
+                st.rerun()
+            except Exception as exc: st.error(str(exc))
+    if selected_rule:
+        if not bool(selected_rule.get("is_deleted")):
+            if st.button("Soft Delete Selected Business Rule", key="delete_selected_rule"):
+                try:
+                    config_service.soft_delete_rule(int(selected_rule_id), user_id); st.success("Business rule soft deleted."); st.rerun()
+                except Exception as exc: st.error(str(exc))
+        else:
+            if st.button("Reactivate Selected Business Rule", key="reactivate_selected_rule"):
+                try:
+                    config_service.reactivate_rule(int(selected_rule_id), user_id); st.success("Business rule reactivated."); st.rerun()
+                except Exception as exc: st.error(str(exc))
+
 with tab_audit:
     st.header("Audit History")
     st.caption("Search audit records using the same Swagger API filter structure as the Data Dictionary page.")
@@ -1179,10 +1281,54 @@ with tab_audit:
             st.error(f"Audit search failed: {exc}")
 
 with tab_prompts:
-    st.header("Prompts Library")
-    st.caption("Future-ready tab. With ENABLE_DB=true, this reads active prompts from dbo.prompt_library in read-only mode.")
+    st.header("Prompt Management")
+    st.caption("Prompt records support multi-sheet upload, update, soft delete and reactivation.")
+    config_service = ConfigurationService()
+    uploaded_prompt_file = st.file_uploader("Upload Excel 2 prompt workbook", type=["xlsx"], key="prompt_upload")
+    if uploaded_prompt_file and st.button("Load Prompt Workbook", key="prompt_upload_button"):
+        try:
+            result = config_service.upload_prompts(uploaded_prompt_file.getvalue(), None, user_id)
+            st.success(f"Loaded {result['processed']} prompt records.")
+            if result['errors']: st.dataframe(pd.DataFrame(result['errors']), use_container_width=True)
+            st.rerun()
+        except Exception as exc: st.error(str(exc))
+    show_deleted_prompts = st.checkbox("Show soft-deleted prompts", key="show_deleted_prompts")
     try:
-        prompts = audit_service.get_prompts()
-        st.dataframe(pd.DataFrame(prompts), use_container_width=True, height=520)
+        prompt_rows = config_service.list_prompts(active_only=not show_deleted_prompts)
+        if prompt_rows:
+            prompt_df = pd.DataFrame(prompt_rows)
+            st.dataframe(prompt_df, use_container_width=True, height=300)
+            selected_prompt_id = st.selectbox("Select Prompt ID for delete/reactivate", [""] + prompt_df["prompt_id"].astype(str).tolist(), key="selected_prompt_id")
+            selected_prompt = next((r for r in prompt_rows if str(r.get("prompt_id")) == selected_prompt_id), None)
+        else:
+            selected_prompt_id, selected_prompt = "", None
+            st.info("No prompt records found.")
     except Exception as exc:
-        st.error(f"Could not load prompt library: {exc}")
+        selected_prompt_id, selected_prompt = "", None
+        st.error(f"Could not load prompt records: {exc}")
+    with st.form("prompt_form"):
+        c1,c2,c3=st.columns(3)
+        prompt_prj_id=c1.text_input("PRJ ID", key="prompt_prj_id")
+        prompt_sector=c2.selectbox("Sector", ["Corporates", "Banks", "Insurance", "SnP"], key="prompt_sector")
+        prompt_cfv=c3.text_input("CFV ID", key="prompt_cfv")
+        prompt_description=st.text_area("Description (Proposed one-shot prompting)", value=(selected_prompt.get("attribute_description") or "") if selected_prompt else "", key="prompt_description")
+        prompt_examples=st.text_area("Examples", value=(selected_prompt.get("examples") or "") if selected_prompt else "", key="prompt_examples")
+        prompt_segment=st.text_input("Segment", value=(selected_prompt.get("segment") or "") if selected_prompt else "", key="prompt_segment")
+        if st.form_submit_button("Save / Update Prompt"):
+            try:
+                config_service.save_prompt({"prj_id":prompt_prj_id,"cfv_id":prompt_cfv,"sector":prompt_sector,"attribute_description":prompt_description,"examples":prompt_examples,"segment":prompt_segment}, user_id)
+                st.success("Prompt saved.")
+                st.rerun()
+            except Exception as exc: st.error(str(exc))
+    if selected_prompt:
+        if not bool(selected_prompt.get("is_deleted")):
+            if st.button("Soft Delete Selected Prompt", key="delete_selected_prompt"):
+                try:
+                    config_service.soft_delete_prompt(int(selected_prompt_id), user_id); st.success("Prompt soft deleted."); st.rerun()
+                except Exception as exc: st.error(str(exc))
+        else:
+            if st.button("Reactivate Selected Prompt", key="reactivate_selected_prompt"):
+                try:
+                    config_service.reactivate_prompt(int(selected_prompt_id), user_id); st.success("Prompt reactivated."); st.rerun()
+                except Exception as exc: st.error(str(exc))
+
