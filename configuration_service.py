@@ -106,6 +106,14 @@ class ConfigurationService:
                 for k,v in vals.items():setattr(x,k,v)
                 x.is_active=True;x.is_deleted=False;x.updated_by=self._actor(user_id)
             db.commit();db.refresh(x);return self._as_dict(x)
+    def list_rules(self, active_only=True):
+        if not self.settings.enable_db:
+            return []
+        with self._session() as db:
+            q = db.query(AttributeBusinessRule)
+            if active_only:
+                q = q.filter(AttributeBusinessRule.is_active == True, AttributeBusinessRule.is_deleted == False)
+            return [self._as_dict(x) for x in q.order_by(AttributeBusinessRule.id).all()]
     def list_prompts(self,active_only=True):
         if not self.settings.enable_db:return []
         with self._session() as db:
