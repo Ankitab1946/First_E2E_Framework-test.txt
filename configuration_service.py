@@ -3,6 +3,7 @@ import json, uuid
 from datetime import datetime, timezone
 from io import BytesIO
 from openpyxl import load_workbook
+import pandas as pd
 from sqlalchemy.orm import Session
 from DataDictionaryAdminApp.config import get_settings
 from DataDictionaryAdminApp.core.database import get_session_factory
@@ -139,3 +140,142 @@ class ConfigurationService:
     def reactivate_display(self,i,u="sysuser"):return self.reactivate(UiDisplayConfig,"display_id",i,u)
     def reactivate_prompt(self,i,u="sysuser"):return self.reactivate(PromptReference,"prompt_id",i,u)
     def reactivate_rule(self,i,u="sysuser"):return self.reactivate(AttributeBusinessRule,"id",i,u)
+
+
+    @staticmethod
+    def _normalize_prompt_column(value: object) -> str:
+        return " ".join(str(value or "").strip().lower().replace("_", " ").split())
+
+    def normalize_prompt_generator_rows(self, dataframe: pd.DataFrame, column_mapping: dict[str, str], sector: str, source_sheet_name: str | None = None) -> tuple[list[dict], list[dict]]:
+        """Normalize a selected worksheet for SQL preview and controlled DB upsert.
+
+        `column_mapping` maps application fields to Excel headers. Empty source cells are
+        represented as None so existing DB values are never wiped during an update.
+        """
+        rows: list[dict] = []
+        errors: list[dict] = []
+        for excel_row, (_, row) in enumerate(dataframe.iterrows(), start=2):
+            def value(field: str):
+                col = column_mapping.get(field)
+                if not col or col not in dataframe.columns:
+                    return None
+                raw = row.get(col)
+                return None if pd.isna(raw) else str(raw).strip()
+
+            prj_id = value("prj_id")
+            if not prj_id:
+                continue
+            payload = {
+                "prj_id": prj_id,
+                "sector": sector,
+                "attribute_name": value("attribute_name"),
+                "section": value("section"),
+                "sub_section": value("sub_section"),
+                "data_type": value("data_type"),
+                "calculated_or_reported": value("calculated_or_reported"),
+                "calculation_logic": value("calculation_logic"),
+                "segment": value("segment"),
+                "subcomponent_total": value("subcomponent_total"),
+                "attribute_description": value("attribute_description"),
+                "examples": value("examples"),
+                "source_sheet_name": source_sheet_name,
+                "_excel_row": excel_row,
+            }
+            rows.append(payload)
+        if not rows:
+            errors.append({"error": "No valid PRJ ID rows were found in the selected worksheet."})
+        return rows, errors
+
+    @staticmethod
+    def _sql_literal(value: object) -> str:
+        if value is None or value == "":
+            return "NULL"
+        return "N'" + str(value).replace("'", "''") + "'"
+
+    def generate_prompt_upsert_sql(self, rows: list[dict], user_id: str = "sysuser", mode: str = "UPDATE_INSERT") -> str:
+        """Generate reviewable SQL Server script for prompt upsert.
+
+        The script derives port_ref_id and scope_id from existing reference/scope tables
+        and skips PRJ IDs not present in master_dictionary. The application DB button
+        remains the preferred execution route because it applies service validation/audit.
+        """
+        lines = [
+            "/* PRJ Scanning Prompt Reference - generated from uploaded Excel */",
+            "SET NOCOUNT ON;",
+            "SET XACT_ABORT ON;",
+            "BEGIN TRANSACTION;",
+            "",
+        ]
+        for item in rows:
+            prj = self._sql_literal(item.get("prj_id"))
+            sector = self._sql_literal(item.get("sector"))
+            actor = self._sql_literal(user_id)
+            lines.extend([
+                f"/* Excel row {item.get('_excel_row', '')}: PRJ ID {item.get('prj_id', '')} */",
+                f"IF NOT EXISTS (SELECT 1 FROM dbo.master_dictionary WHERE prj_id = {prj} AND ISNULL(is_deleted, 0) = 0)",
+                f"    PRINT 'SKIPPED: PRJ ID not in Master Dictionary - ' + {prj};",
+                "ELSE",
+                "BEGIN",
+                "    DECLARE @port_ref_id BIGINT, @scope_id BIGINT;",
+                "    SELECT TOP (1) @port_ref_id = p.port_ref_id",
+                "    FROM dbo.prj_portfolio_reference_test p",
+                "    WHERE p.is_active = 1 AND ((LOWER(" + sector + ") IN ('banks','bank') AND p.port_name='FI' AND p.sector_name='Banks')",
+                "       OR (LOWER(" + sector + ")='insurance' AND p.port_name='FI' AND p.sector_name='Insurance')",
+                "       OR (LOWER(" + sector + ") IN ('corporates','corporate') AND p.port_name='Corporate' AND p.sector_name='Corporate')",
+                "       OR (LOWER(" + sector + ") IN ('downstream','ukc') AND p.port_name='UKC' AND p.sector_name='UKC')",
+                "       OR (LOWER(" + sector + ") IN ('snp','s&p') AND p.port_name='SnP' AND p.sector_name='SnP'));",
+                "    SELECT @scope_id = s.scope_id FROM dbo.prj_attribute_portfolio_scope_test s WHERE s.prj_id = " + prj + " AND s.port_ref_id = @port_ref_id AND s.is_active = 1 AND ISNULL(s.is_deleted,0)=0;",
+                "    IF @scope_id IS NULL",
+                f"        PRINT 'SKIPPED: no active scope for PRJ ID / sector - ' + {prj};",
+                "    ELSE",
+                "    BEGIN",
+                "        IF EXISTS (SELECT 1 FROM dbo.prj_scanning_prompt_reference_test WHERE scope_id=@scope_id AND prj_id=" + prj + " AND port_ref_id=@port_ref_id)",
+                "        BEGIN",
+                "            UPDATE dbo.prj_scanning_prompt_reference_test SET",
+            ])
+            update_fields = [
+                "attribute_name", "section", "sub_section", "data_type", "calculated_or_reported", "calculation_logic", "segment", "subcomponent_total", "attribute_description", "examples", "source_sheet_name"
+            ]
+            update_lines=[]
+            for field in update_fields:
+                val=self._sql_literal(item.get(field))
+                update_lines.append(f"                {field} = COALESCE({val}, {field})")
+            update_lines += ["                is_active = 1", "                is_deleted = 0", "                deleted_at = NULL", "                deleted_by = NULL", "                updated_at = SYSUTCDATETIME()", f"                updated_by = {actor}"]
+            lines.append(",\n".join(update_lines))
+            lines.extend([
+                "            WHERE scope_id=@scope_id AND prj_id=" + prj + " AND port_ref_id=@port_ref_id;",
+                "        END",
+                "        ELSE",
+                "        BEGIN",
+                "            INSERT INTO dbo.prj_scanning_prompt_reference_test",
+                "            (scope_id, prj_id, port_ref_id, attribute_name, section, sub_section, data_type, calculated_or_reported, calculation_logic, segment, subcomponent_total, attribute_description, examples, source_sheet_name, is_active, is_deleted, created_at, updated_at, created_by, updated_by)",
+                "            VALUES (@scope_id, " + prj + ", @port_ref_id, " + ", ".join(self._sql_literal(item.get(f)) for f in update_fields) + ", 1, 0, SYSUTCDATETIME(), SYSUTCDATETIME(), " + actor + ", " + actor + ");",
+                "        END",
+                "    END",
+                "END",
+                "GO",
+                "",
+            ])
+        lines.extend(["COMMIT TRANSACTION;", "GO"])
+        return "\n".join(lines)
+
+    def upsert_prompt_generator_rows(self, rows: list[dict], user_id: str = "sysuser") -> dict:
+        """Apply selected Excel rows through the service layer with audit logging."""
+        processed = 0
+        errors: list[dict] = []
+        skipped_not_in_master: list[dict] = []
+        for item in rows:
+            prj_id = str(item.get("prj_id") or "").strip()
+            if not prj_id:
+                continue
+            try:
+                with self._session() as db:
+                    exists = bool(db.query(MasterDictionary.id).filter_by(prj_id=prj_id, is_deleted=False).first())
+                if not exists:
+                    skipped_not_in_master.append({"row": item.get("_excel_row"), "prj_id": prj_id, "reason": "Not present in Master Dictionary"})
+                    continue
+                self.save_prompt({k: v for k, v in item.items() if not k.startswith("_")}, user_id)
+                processed += 1
+            except Exception as exc:
+                errors.append({"row": item.get("_excel_row"), "prj_id": prj_id, "error": str(exc)})
+        return {"processed": processed, "skipped_not_in_master": skipped_not_in_master, "errors": errors}
