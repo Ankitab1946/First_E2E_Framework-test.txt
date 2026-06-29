@@ -21,7 +21,9 @@ class AttributePayload(BaseModel):
     prj_physical_attribute_name: Optional[str] = None
     editable: Optional[bool] = None
     percentage_ratio: Optional[str] = None
+    calculated_or_reported: Optional[str] = None
     calculation_logic: Optional[str] = None
+    calculation_logic_details: Optional[str] = None
     where_in_financial_statement: Optional[str] = None
     required_by_corporates: Optional[bool] = None
     required_by_banks: Optional[bool] = None
