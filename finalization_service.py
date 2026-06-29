@@ -103,9 +103,17 @@ class FinalizationService:
             action = "REACTIVATE"
             new_value = {"prj_id": prj_id, "is_active": True}
         else:
-            # A physical name is immutable once generated. Only create it when blank.
-            if not record.get("prj_physical_attribute_name"):
-                record["prj_physical_attribute_name"] = self._fast_physical_name(record.get("prj_attribute_name", ""), prj_id)
+            # Preserve the physical name supplied in Excel. If Excel leaves it blank,
+            # preserve an existing name; only new blank records receive a short unique name.
+            supplied_physical_name = str(record.get("prj_physical_attribute_name") or "").strip()
+            if supplied_physical_name:
+                record["prj_physical_attribute_name"] = supplied_physical_name[:255]
+            elif existing and getattr(existing, "prj_physical_attribute_name", None):
+                record["prj_physical_attribute_name"] = existing.prj_physical_attribute_name
+            else:
+                record["prj_physical_attribute_name"] = self._next_unique_physical_name(
+                    db, record.get("prj_attribute_name", ""), prj_id
+                )
             action = self.dictionary_repo.upsert_master(db, record, user_id, existing=existing)
             if existing is None and existing_cache is not None:
                 existing_cache[prj_id] = db.new and next((x for x in db.new if getattr(x, "prj_id", None) == prj_id), None)
@@ -125,10 +133,23 @@ class FinalizationService:
         )
 
     @staticmethod
-    def _fast_physical_name(attribute_name: str, prj_id: str) -> str:
+    def _short_physical_name(attribute_name: str, prj_id: str) -> str:
         import re
-        base = re.sub(r"[^a-z0-9]+", "_", str(attribute_name or "").lower()).strip("_")
-        return (base or f"prj_{prj_id.lower()}")[:240]
+        abbreviations = {"buildings": "bldgs", "building": "bldg", "property": "prop", "financial": "fin", "statement": "stmt", "calculation": "calc"}
+        words = re.sub(r"[^a-z0-9]+", " ", str(attribute_name or "").lower()).split()
+        base = "_".join(abbreviations.get(word, word) for word in words).strip("_")
+        return (base or f"prj_{str(prj_id).lower()}")[:240]
+
+    def _next_unique_physical_name(self, db, attribute_name: str, prj_id: str) -> str:
+        from DataDictionaryAdminApp.model.master_dictionary import MasterDictionary
+        base = self._short_physical_name(attribute_name, prj_id)
+        existing_names = {str(x[0]).lower() for x in db.query(MasterDictionary.prj_physical_attribute_name).filter(MasterDictionary.prj_physical_attribute_name.isnot(None)).all()}
+        candidate, counter = base, 2
+        while candidate.lower() in existing_names:
+            suffix = f"_{counter}"
+            candidate = f"{base[:240-len(suffix)]}{suffix}"
+            counter += 1
+        return candidate
 
     def _archive_target_history(self, db, *, batch_id: str, prj_id: str, action_type: str, changed_by: str, target_cache: dict | None = None) -> None:
         targets = [
