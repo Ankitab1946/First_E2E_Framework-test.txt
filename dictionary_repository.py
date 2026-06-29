@@ -1,9 +1,9 @@
 from sqlalchemy import or_, distinct
 from sqlalchemy.orm import Session
-from app.models.master_dictionary import MasterDictionary
-from app.repositories.filter_utils import apply_dictionary_filters
-from app.utils.constants import PORTFOLIO_FIELD_MAP
-from app.utils.excel_mapping import MASTER_FIELDS
+from DataDictionaryAdminApp.model.master_dictionary import MasterDictionary
+from DataDictionaryAdminApp.repositories.filter_utils import apply_dictionary_filters
+from DataDictionaryAdminApp.utils.constants import PORTFOLIO_FIELD_MAP
+from DataDictionaryAdminApp.utils.excel_mapping import MASTER_FIELDS
 
 
 class DictionaryRepository:
@@ -94,8 +94,8 @@ class DictionaryRepository:
         rows = db.query(distinct(MasterDictionary.where_in_financial_statement)).order_by(MasterDictionary.where_in_financial_statement).all()
         return [row[0] for row in rows if row[0]]
 
-    def upsert_master(self, db: Session, record: dict, user_id: str) -> str:
-        existing = self.get_by_prj_id(db, record["prj_id"])
+    def upsert_master(self, db: Session, record: dict, user_id: str, existing=None) -> str:
+        existing = existing if existing is not None else self.get_by_prj_id(db, record["prj_id"])
         if existing is None:
             entity = MasterDictionary(**{k: record.get(k) for k in MASTER_FIELDS})
             entity.created_by = user_id
