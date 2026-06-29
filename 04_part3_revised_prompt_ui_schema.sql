@@ -105,3 +105,21 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='ix_scope_prj_active' AND ob
 CREATE INDEX ix_scope_prj_active ON dbo.prj_attribute_portfolio_scope_test(prj_id,port_ref_id,is_active,is_deleted);
 GO
 PRINT 'Part 3 revised Prompt/UI configuration schema created successfully.';
+
+/* Existing deployments may have this table from an older schema without soft-delete columns. */
+IF OBJECT_ID('dbo.prj_attribute_business_rules_test', 'U') IS NOT NULL
+BEGIN
+ IF COL_LENGTH('dbo.prj_attribute_business_rules_test','is_active') IS NULL
+  ALTER TABLE dbo.prj_attribute_business_rules_test ADD is_active BIT NOT NULL CONSTRAINT DF_prj_attribute_business_rules_test_is_active DEFAULT 1 WITH VALUES;
+ IF COL_LENGTH('dbo.prj_attribute_business_rules_test','is_deleted') IS NULL
+  ALTER TABLE dbo.prj_attribute_business_rules_test ADD is_deleted BIT NOT NULL CONSTRAINT DF_prj_attribute_business_rules_test_is_deleted DEFAULT 0 WITH VALUES;
+ IF COL_LENGTH('dbo.prj_attribute_business_rules_test','deleted_at') IS NULL
+  ALTER TABLE dbo.prj_attribute_business_rules_test ADD deleted_at DATETIME2 NULL;
+ IF COL_LENGTH('dbo.prj_attribute_business_rules_test','deleted_by') IS NULL
+  ALTER TABLE dbo.prj_attribute_business_rules_test ADD deleted_by NVARCHAR(100) NULL;
+END
+GO
+IF OBJECT_ID('dbo.prj_attribute_business_rules_test', 'U') IS NOT NULL
+AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='ix_business_rules_active_deleted' AND object_id=OBJECT_ID('dbo.prj_attribute_business_rules_test'))
+CREATE INDEX ix_business_rules_active_deleted ON dbo.prj_attribute_business_rules_test(is_active,is_deleted,scope_id);
+GO
