@@ -1288,9 +1288,12 @@ with tab_prompts:
     if uploaded_prompt_file and st.button("Load Prompt Workbook", key="prompt_upload_button"):
         try:
             result = config_service.upload_prompts(uploaded_prompt_file.getvalue(), None, user_id)
-            st.success(f"Loaded {result['processed']} prompt records.")
-            if result['errors']: st.dataframe(pd.DataFrame(result['errors']), use_container_width=True)
-            st.rerun()
+            st.success(f"Loaded or updated {result['processed']} prompt records.")
+            if result.get("skipped_not_in_master"):
+                st.warning(f"{len(result['skipped_not_in_master'])} PRJ IDs were not loaded because they are absent from Master Dictionary.")
+                st.dataframe(pd.DataFrame(result["skipped_not_in_master"]), use_container_width=True)
+            if result["errors"]: st.dataframe(pd.DataFrame(result["errors"]), use_container_width=True)
+            # Keep upload outcome visible; the user decides when to refresh the grid.
         except Exception as exc: st.error(str(exc))
     show_deleted_prompts = st.checkbox("Show soft-deleted prompts", key="show_deleted_prompts")
     try:
@@ -1308,7 +1311,7 @@ with tab_prompts:
         st.error(f"Could not load prompt records: {exc}")
     with st.form("prompt_form"):
         c1,c2,c3=st.columns(3)
-        prompt_prj_id=c1.text_input("PRJ ID", key="prompt_prj_id")
+        prompt_prj_id=c1.text_input("PRJ ID (must exist in Master Dictionary; readonly after selection)", value=(selected_prompt.get("prj_id") or "") if selected_prompt else "", disabled=bool(selected_prompt), key="prompt_prj_id")
         prompt_sector=c2.selectbox("Sector", ["Corporates", "Banks", "Insurance", "SnP"], key="prompt_sector")
         prompt_cfv=c3.text_input("CFV ID", key="prompt_cfv")
         prompt_description=st.text_area("Description (Proposed one-shot prompting)", value=(selected_prompt.get("attribute_description") or "") if selected_prompt else "", key="prompt_description")
@@ -1316,7 +1319,7 @@ with tab_prompts:
         prompt_segment=st.text_input("Segment", value=(selected_prompt.get("segment") or "") if selected_prompt else "", key="prompt_segment")
         if st.form_submit_button("Save / Update Prompt"):
             try:
-                config_service.save_prompt({"prj_id":prompt_prj_id,"cfv_id":prompt_cfv,"sector":prompt_sector,"attribute_description":prompt_description,"examples":prompt_examples,"segment":prompt_segment}, user_id)
+                config_service.save_prompt({"prj_id":prompt_prj_id,"sector":prompt_sector,"attribute_description":prompt_description,"examples":prompt_examples,"segment":prompt_segment}, user_id)
                 st.success("Prompt saved.")
                 st.rerun()
             except Exception as exc: st.error(str(exc))
