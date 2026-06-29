@@ -1,5 +1,6 @@
 import os
 import json
+from io import BytesIO
 from typing import Any
 from urllib.parse import quote
 
@@ -1282,56 +1283,152 @@ with tab_audit:
 
 with tab_prompts:
     st.header("Prompt Management")
-    st.caption("Prompt records support multi-sheet upload, update, soft delete and reactivation.")
+    st.caption("Manage PRJ scanning prompts, bulk-load workbooks, generate reviewable SQL, and apply validated database updates.")
     config_service = ConfigurationService()
-    uploaded_prompt_file = st.file_uploader("Upload Excel 2 prompt workbook", type=["xlsx"], key="prompt_upload")
-    if uploaded_prompt_file and st.button("Load Prompt Workbook", key="prompt_upload_button"):
-        try:
-            result = config_service.upload_prompts(uploaded_prompt_file.getvalue(), None, user_id)
-            st.success(f"Loaded or updated {result['processed']} prompt records.")
-            if result.get("skipped_not_in_master"):
-                st.warning(f"{len(result['skipped_not_in_master'])} PRJ IDs were not loaded because they are absent from Master Dictionary.")
-                st.dataframe(pd.DataFrame(result["skipped_not_in_master"]), use_container_width=True)
-            if result["errors"]: st.dataframe(pd.DataFrame(result["errors"]), use_container_width=True)
-            # Keep upload outcome visible; the user decides when to refresh the grid.
-        except Exception as exc: st.error(str(exc))
-    show_deleted_prompts = st.checkbox("Show soft-deleted prompts", key="show_deleted_prompts")
-    try:
-        prompt_rows = config_service.list_prompts(active_only=not show_deleted_prompts)
-        if prompt_rows:
-            prompt_df = pd.DataFrame(prompt_rows)
-            st.dataframe(prompt_df, use_container_width=True, height=300)
-            selected_prompt_id = st.selectbox("Select Prompt ID for delete/reactivate", [""] + prompt_df["prompt_id"].astype(str).tolist(), key="selected_prompt_id")
-            selected_prompt = next((r for r in prompt_rows if str(r.get("prompt_id")) == selected_prompt_id), None)
-        else:
-            selected_prompt_id, selected_prompt = "", None
-            st.info("No prompt records found.")
-    except Exception as exc:
-        selected_prompt_id, selected_prompt = "", None
-        st.error(f"Could not load prompt records: {exc}")
-    with st.form("prompt_form"):
-        c1,c2,c3=st.columns(3)
-        prompt_prj_id=c1.text_input("PRJ ID (must exist in Master Dictionary; readonly after selection)", value=(selected_prompt.get("prj_id") or "") if selected_prompt else "", disabled=bool(selected_prompt), key="prompt_prj_id")
-        prompt_sector=c2.selectbox("Sector", ["Corporates", "Banks", "Insurance", "SnP"], key="prompt_sector")
-        prompt_cfv=c3.text_input("CFV ID", key="prompt_cfv")
-        prompt_description=st.text_area("Description (Proposed one-shot prompting)", value=(selected_prompt.get("attribute_description") or "") if selected_prompt else "", key="prompt_description")
-        prompt_examples=st.text_area("Examples", value=(selected_prompt.get("examples") or "") if selected_prompt else "", key="prompt_examples")
-        prompt_segment=st.text_input("Segment", value=(selected_prompt.get("segment") or "") if selected_prompt else "", key="prompt_segment")
-        if st.form_submit_button("Save / Update Prompt"):
+    prompt_form_tab, sql_generator_tab = st.tabs(["Prompt Form & Library", "SQL Query Generator"])
+
+    with prompt_form_tab:
+        uploaded_prompt_file = st.file_uploader("Upload Excel 2 prompt workbook", type=["xlsx"], key="prompt_upload")
+        if uploaded_prompt_file and st.button("Load Prompt Workbook", key="prompt_upload_button"):
             try:
-                config_service.save_prompt({"prj_id":prompt_prj_id,"sector":prompt_sector,"attribute_description":prompt_description,"examples":prompt_examples,"segment":prompt_segment}, user_id)
-                st.success("Prompt saved.")
-                st.rerun()
-            except Exception as exc: st.error(str(exc))
-    if selected_prompt:
-        if not bool(selected_prompt.get("is_deleted")):
-            if st.button("Soft Delete Selected Prompt", key="delete_selected_prompt"):
+                result = config_service.upload_prompts(uploaded_prompt_file.getvalue(), None, user_id)
+                st.success(f"Loaded or updated {result['processed']} prompt records.")
+                if result.get("skipped_not_in_master"):
+                    st.warning(f"{len(result['skipped_not_in_master'])} PRJ IDs were not loaded because they are absent from Master Dictionary.")
+                    st.dataframe(pd.DataFrame(result["skipped_not_in_master"]), use_container_width=True)
+                if result["errors"]:
+                    st.dataframe(pd.DataFrame(result["errors"]), use_container_width=True)
+            except Exception as exc:
+                st.error(str(exc))
+
+        show_deleted_prompts = st.checkbox("Show soft-deleted prompts", key="show_deleted_prompts")
+        try:
+            prompt_rows = config_service.list_prompts(active_only=not show_deleted_prompts)
+            if prompt_rows:
+                prompt_df = pd.DataFrame(prompt_rows)
+                st.dataframe(prompt_df, use_container_width=True, height=300)
+                selected_prompt_id = st.selectbox("Select Prompt ID for delete/reactivate", [""] + prompt_df["prompt_id"].astype(str).tolist(), key="selected_prompt_id")
+                selected_prompt = next((r for r in prompt_rows if str(r.get("prompt_id")) == selected_prompt_id), None)
+            else:
+                selected_prompt_id, selected_prompt = "", None
+                st.info("No prompt records found.")
+        except Exception as exc:
+            selected_prompt_id, selected_prompt = "", None
+            st.error(f"Could not load prompt records: {exc}")
+
+        with st.form("prompt_form"):
+            c1, c2, c3 = st.columns(3)
+            prompt_prj_id = c1.text_input("PRJ ID (must exist in Master Dictionary; readonly after selection)", value=(selected_prompt.get("prj_id") or "") if selected_prompt else "", disabled=bool(selected_prompt), key="prompt_prj_id")
+            prompt_sector = c2.selectbox("Sector", ["Corporates", "Banks", "Insurance", "Downstream", "SnP"], key="prompt_sector")
+            c3.text_input("CFV ID", key="prompt_cfv")
+            prompt_description = st.text_area("Description (Proposed one-shot prompting)", value=(selected_prompt.get("attribute_description") or "") if selected_prompt else "", key="prompt_description")
+            prompt_examples = st.text_area("Examples", value=(selected_prompt.get("examples") or "") if selected_prompt else "", key="prompt_examples")
+            prompt_segment = st.text_input("Segment", value=(selected_prompt.get("segment") or "") if selected_prompt else "", key="prompt_segment")
+            if st.form_submit_button("Save / Update Prompt"):
                 try:
-                    config_service.soft_delete_prompt(int(selected_prompt_id), user_id); st.success("Prompt soft deleted."); st.rerun()
-                except Exception as exc: st.error(str(exc))
+                    config_service.save_prompt({"prj_id": prompt_prj_id, "sector": prompt_sector, "attribute_description": prompt_description, "examples": prompt_examples, "segment": prompt_segment}, user_id)
+                    st.success("Prompt saved.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+        if selected_prompt:
+            if not bool(selected_prompt.get("is_deleted")):
+                if st.button("Soft Delete Selected Prompt", key="delete_selected_prompt"):
+                    try:
+                        config_service.soft_delete_prompt(int(selected_prompt_id), user_id)
+                        st.success("Prompt soft deleted.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+            elif st.button("Reactivate Selected Prompt", key="reactivate_selected_prompt"):
+                try:
+                    config_service.reactivate_prompt(int(selected_prompt_id), user_id)
+                    st.success("Prompt reactivated.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+    with sql_generator_tab:
+        st.subheader("PRJ Scanning Prompt Reference: SQL Insert / Update Generator")
+        st.caption("The generated SQL is downloadable for review. Use Update Database to run the same rows through the application service, scope validation, and audit logging.")
+        generator_file = st.file_uploader("Upload Excel file for SQL generation", type=["xlsx", "xls"], key="sql_generator_upload")
+        if generator_file is not None:
+            st.session_state["sql_generator_file_bytes"] = generator_file.getvalue()
+            st.session_state["sql_generator_file_name"] = generator_file.name
+
+        file_bytes = st.session_state.get("sql_generator_file_bytes")
+        if not file_bytes:
+            st.info("Upload an Excel workbook to select a sheet, map the columns, generate SQL, or update the database.")
         else:
-            if st.button("Reactivate Selected Prompt", key="reactivate_selected_prompt"):
-                try:
-                    config_service.reactivate_prompt(int(selected_prompt_id), user_id); st.success("Prompt reactivated."); st.rerun()
-                except Exception as exc: st.error(str(exc))
+            try:
+                excel_file = pd.ExcelFile(BytesIO(file_bytes))
+                sheet_names = excel_file.sheet_names
+                selected_sheet = st.selectbox("Select sheet to process", sheet_names, key="sql_generator_sheet")
+                generator_df = pd.read_excel(BytesIO(file_bytes), sheet_name=selected_sheet)
+                st.session_state["sql_generator_df"] = generator_df
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Total rows", len(generator_df))
+                m2.metric("Total columns", len(generator_df.columns))
+                m3.metric("Rows with PRJ ID", int(generator_df.notna().any(axis=1).sum()))
+                with st.expander("Preview uploaded data", expanded=True):
+                    st.dataframe(generator_df.head(50), use_container_width=True)
+                with st.expander("Available Excel columns"):
+                    st.write(list(generator_df.columns))
+
+                columns = [""] + [str(c) for c in generator_df.columns]
+                lookup = {str(c).strip().lower(): str(c) for c in generator_df.columns}
+                def suggested(*names: str) -> int:
+                    for name in names:
+                        value = lookup.get(name.lower())
+                        if value in columns:
+                            return columns.index(value)
+                    return 0
+
+                st.markdown("#### Excel to database mapping")
+                mc1, mc2, mc3 = st.columns(3)
+                column_mapping = {
+                    "prj_id": mc1.selectbox("PRJ ID column *", columns, index=suggested("PRJID", "PRJ ID"), key="sql_map_prj_id"),
+                    "attribute_name": mc2.selectbox("Attribute Name", columns, index=suggested("PRJ Attribute", "Attribute Name"), key="sql_map_attribute_name"),
+                    "segment": mc3.selectbox("Segment", columns, index=suggested("Location in Financial Reports", "Segment"), key="sql_map_segment"),
+                    "attribute_description": mc1.selectbox("Description", columns, index=suggested("Description (Proposed one-shot prompt)", "Description (Proposed one-shot prompting)", "Description"), key="sql_map_description"),
+                    "section": mc2.selectbox("Section", columns, index=suggested("Section"), key="sql_map_section"),
+                    "sub_section": mc3.selectbox("Sub-section", columns, index=suggested("Sub-Section", "Sub Section"), key="sql_map_subsection"),
+                    "data_type": mc1.selectbox("Data Type", columns, index=suggested("DATA TYPE(Amount%/Ratio/actual)", "Data Type"), key="sql_map_data_type"),
+                    "calculated_or_reported": mc2.selectbox("Calculated or Reported", columns, index=suggested("Calculated or Reported"), key="sql_map_calc_reported"),
+                    "calculation_logic": mc3.selectbox("Calculation Logic", columns, index=suggested("Calculation Logic"), key="sql_map_calc_logic"),
+                    "subcomponent_total": mc1.selectbox("Subcomponent / Total", columns, index=suggested("Subcomponent/Total", "Subcomponent / Total"), key="sql_map_subcomponent"),
+                    "examples": mc2.selectbox("Examples", columns, index=suggested("Examples"), key="sql_map_examples"),
+                }
+                sector = mc3.selectbox("Target portfolio / sector *", ["Banks", "Insurance", "Corporates", "Downstream", "SnP"], key="sql_generator_sector")
+                if not column_mapping["prj_id"]:
+                    st.error("Select the mandatory PRJ ID column before generating SQL or updating the database.")
+                else:
+                    rows, normalize_errors = config_service.normalize_prompt_generator_rows(generator_df, column_mapping, sector, selected_sheet)
+                    st.info(f"Prepared {len(rows)} rows from sheet '{selected_sheet}'. Blank optional Excel fields will not overwrite existing database values.")
+                    if normalize_errors:
+                        st.dataframe(pd.DataFrame(normalize_errors), use_container_width=True)
+                    action_col1, action_col2 = st.columns(2)
+                    with action_col1:
+                        if st.button("Generate SQL Script", type="primary", use_container_width=True, key="generate_prompt_sql"):
+                            st.session_state["generated_prompt_sql"] = config_service.generate_prompt_upsert_sql(rows, user_id)
+                    with action_col2:
+                        confirm_db_update = st.checkbox("I confirm this will insert/update prompt records", key="confirm_prompt_db_update")
+                        if st.button("Update Database", type="primary", use_container_width=True, disabled=not (admin and confirm_db_update), key="update_prompt_db"):
+                            result = config_service.upsert_prompt_generator_rows(rows, user_id)
+                            st.success(f"Database update completed. {result['processed']} prompt records inserted or updated.")
+                            if result["skipped_not_in_master"]:
+                                st.warning(f"{len(result['skipped_not_in_master'])} row(s) skipped because PRJ ID is not present in Master Dictionary.")
+                                st.dataframe(pd.DataFrame(result["skipped_not_in_master"]), use_container_width=True)
+                            if result["errors"]:
+                                st.error(f"{len(result['errors'])} row(s) could not be processed.")
+                                st.dataframe(pd.DataFrame(result["errors"]), use_container_width=True)
+                    if not admin:
+                        st.warning("Only Admin users can update the database. SQL generation remains available for review.")
+                    generated_sql = st.session_state.get("generated_prompt_sql")
+                    if generated_sql:
+                        st.markdown("#### Generated SQL Server upsert script")
+                        st.code(generated_sql, language="sql", line_numbers=True)
+                        st.download_button("Download SQL Script", generated_sql, file_name=f"prompt_upsert_{selected_sheet}.sql", mime="text/sql", use_container_width=True)
+            except Exception as exc:
+                st.error(f"Could not read the SQL generator workbook: {exc}")
 
