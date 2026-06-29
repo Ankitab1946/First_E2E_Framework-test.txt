@@ -10,8 +10,10 @@ BEGIN
         prj_attribute_description NVARCHAR(MAX) NULL,
         prj_physical_attribute_name NVARCHAR(255) NULL,
         editable BIT NULL,
+        calculated_or_reported NVARCHAR(100) NULL,
         percentage_ratio NVARCHAR(50) NULL,
         calculation_logic NVARCHAR(MAX) NULL,
+        calculation_logic_details NVARCHAR(MAX) NULL,
         where_in_financial_statement NVARCHAR(MAX) NULL,
         required_by_corporates BIT NULL,
         required_by_banks BIT NULL,
@@ -22,7 +24,7 @@ BEGIN
         mapping_type NVARCHAR(255) NULL,
         calculation_in_prj NVARCHAR(MAX) NULL,
         editable_in_historicals BIT NULL,
-        sign_flipping BIT NULL,
+        sign_flipping NVARCHAR(100) NULL,
         gc_template_attribute_name NVARCHAR(255) NULL,
         sp_standardisation_attribute_name NVARCHAR(255) NULL,
         sp_standardisation_dataitem_id NVARCHAR(100) NULL,
@@ -236,4 +238,40 @@ BEGIN
     CREATE INDEX ix_history_log_prj_changed_at
     ON dbo.history_log(prj_id, changed_at DESC);
 END
+GO
+
+-- Part 3 normalized configuration tables. Safe creation for new deployments.
+IF OBJECT_ID('dbo.prj_portfolio_reference', 'U') IS NULL
+CREATE TABLE dbo.prj_portfolio_reference (
+ port_ref_id BIGINT IDENTITY(1,1) PRIMARY KEY, port_name NVARCHAR(100) NOT NULL, sector_name NVARCHAR(100) NOT NULL, sub_sector NVARCHAR(100) NULL,
+ remark NVARCHAR(MAX) NULL, is_active BIT NOT NULL DEFAULT 1, created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), created_by NVARCHAR(100) NOT NULL DEFAULT 'sysuser', updated_by NVARCHAR(100) NOT NULL DEFAULT 'sysuser',
+ CONSTRAINT uq_portfolio_reference UNIQUE(port_name,sector_name,sub_sector));
+GO
+IF OBJECT_ID('dbo.prj_attribute_portfolio_scope', 'U') IS NULL
+CREATE TABLE dbo.prj_attribute_portfolio_scope (
+ scope_id BIGINT IDENTITY(1,1) PRIMARY KEY, prj_id NVARCHAR(100) NOT NULL, port_ref_id BIGINT NOT NULL, description NVARCHAR(MAX) NULL, is_active BIT NOT NULL DEFAULT 1, is_deleted BIT NOT NULL DEFAULT 0,
+ created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), created_by NVARCHAR(100) NOT NULL DEFAULT 'sysuser', updated_by NVARCHAR(100) NOT NULL DEFAULT 'sysuser', deleted_at DATETIME2 NULL, deleted_by NVARCHAR(100) NULL,
+ CONSTRAINT uq_attribute_portfolio_scope UNIQUE(prj_id,port_ref_id), CONSTRAINT fk_scope_portfolio FOREIGN KEY(port_ref_id) REFERENCES dbo.prj_portfolio_reference(port_ref_id));
+GO
+IF OBJECT_ID('dbo.prj_ui_display_config_test', 'U') IS NULL
+CREATE TABLE dbo.prj_ui_display_config_test (
+ display_id BIGINT IDENTITY(1,1) PRIMARY KEY, scope_id BIGINT NOT NULL, display_order INT NULL, display_name NVARCHAR(500) NOT NULL, section NVARCHAR(500) NULL, subsection NVARCHAR(500) NULL, view_name NVARCHAR(500) NULL, description NVARCHAR(MAX) NULL,
+ is_active BIT NOT NULL DEFAULT 1, is_deleted BIT NOT NULL DEFAULT 0, created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), created_by NVARCHAR(100) NOT NULL DEFAULT 'sysuser', updated_by NVARCHAR(100) NOT NULL DEFAULT 'sysuser', deleted_at DATETIME2 NULL, deleted_by NVARCHAR(100) NULL,
+ CONSTRAINT fk_display_scope FOREIGN KEY(scope_id) REFERENCES dbo.prj_attribute_portfolio_scope(scope_id));
+GO
+IF OBJECT_ID('dbo.prj_attribute_business_rules_test', 'U') IS NULL
+CREATE TABLE dbo.prj_attribute_business_rules_test (
+ id BIGINT IDENTITY(1,1) PRIMARY KEY, scope_id BIGINT NOT NULL UNIQUE, source_abbr_name NVARCHAR(100) NOT NULL DEFAULT 'SNPAR', editable BIT NULL, symbol NVARCHAR(50) NULL, mapping_type NVARCHAR(255) NULL, mapping_logic NVARCHAR(MAX) NULL, calculation_logic NVARCHAR(MAX) NULL, business_logic NVARCHAR(MAX) NULL,
+ is_active BIT NOT NULL DEFAULT 1, is_deleted BIT NOT NULL DEFAULT 0, created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), created_by NVARCHAR(100) NOT NULL DEFAULT 'sysuser', updated_by NVARCHAR(100) NOT NULL DEFAULT 'sysuser',
+ CONSTRAINT fk_business_rule_scope FOREIGN KEY(scope_id) REFERENCES dbo.prj_attribute_portfolio_scope(scope_id));
+GO
+IF OBJECT_ID('dbo.prj_prompt_reference', 'U') IS NULL
+CREATE TABLE dbo.prj_prompt_reference (
+ prompt_id BIGINT IDENTITY(1,1) PRIMARY KEY, scope_id BIGINT NOT NULL, cfv_id NVARCHAR(100) NOT NULL, port_ref_id BIGINT NOT NULL, attribute_description NVARCHAR(MAX) NULL, examples NVARCHAR(MAX) NULL, segment NVARCHAR(500) NULL, source_sheet_name NVARCHAR(255) NULL,
+ is_active BIT NOT NULL DEFAULT 1, is_deleted BIT NOT NULL DEFAULT 0, created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(), created_by NVARCHAR(100) NOT NULL DEFAULT 'sysuser', updated_by NVARCHAR(100) NOT NULL DEFAULT 'sysuser', deleted_at DATETIME2 NULL, deleted_by NVARCHAR(100) NULL,
+ CONSTRAINT uq_prompt_reference_scope_cfv_port UNIQUE(scope_id,cfv_id,port_ref_id), CONSTRAINT fk_prompt_scope FOREIGN KEY(scope_id) REFERENCES dbo.prj_attribute_portfolio_scope(scope_id), CONSTRAINT fk_prompt_port FOREIGN KEY(port_ref_id) REFERENCES dbo.prj_portfolio_reference(port_ref_id));
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='ix_scope_prj_port' AND object_id=OBJECT_ID('dbo.prj_attribute_portfolio_scope')) CREATE INDEX ix_scope_prj_port ON dbo.prj_attribute_portfolio_scope(prj_id, port_ref_id, is_active);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='ix_display_scope_order' AND object_id=OBJECT_ID('dbo.prj_ui_display_config_test')) CREATE INDEX ix_display_scope_order ON dbo.prj_ui_display_config_test(scope_id, display_order, is_active);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='ix_prompt_scope_cfv' AND object_id=OBJECT_ID('dbo.prj_prompt_reference')) CREATE INDEX ix_prompt_scope_cfv ON dbo.prj_prompt_reference(scope_id, cfv_id, is_active);
 GO
