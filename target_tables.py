@@ -77,3 +77,7 @@ class PrjAttrBusinessLogicScope(Base):
     updated_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime(), onupdate=func.sysutcdatetime())
     created_by: Mapped[str] = mapped_column(String(100), default="sysuser")
     updated_by: Mapped[str] = mapped_column(String(100), default="sysuser")
+
+
+# Backward-compatible name retained for legacy services.
+CFVAttrBusinessLogic = PrjAttrBusinessLogic
