@@ -1,3 +1,17 @@
+
+/* Compatibility: master_dictionary soft-delete columns for existing databases */
+IF COL_LENGTH('dbo.master_dictionary','is_active') IS NULL
+    ALTER TABLE dbo.master_dictionary ADD is_active BIT NOT NULL CONSTRAINT DF_master_dictionary_is_active DEFAULT 1 WITH VALUES;
+IF COL_LENGTH('dbo.master_dictionary','is_deleted') IS NULL
+    ALTER TABLE dbo.master_dictionary ADD is_deleted BIT NOT NULL CONSTRAINT DF_master_dictionary_is_deleted DEFAULT 0 WITH VALUES;
+IF COL_LENGTH('dbo.master_dictionary','deleted_at') IS NULL
+    ALTER TABLE dbo.master_dictionary ADD deleted_at DATETIME2 NULL;
+IF COL_LENGTH('dbo.master_dictionary','deleted_by') IS NULL
+    ALTER TABLE dbo.master_dictionary ADD deleted_by NVARCHAR(100) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='ix_master_dictionary_active_deleted' AND object_id=OBJECT_ID('dbo.master_dictionary'))
+    CREATE INDEX ix_master_dictionary_active_deleted ON dbo.master_dictionary(is_active,is_deleted,prj_id);
+GO
+
 /* Part 3 revised schema: run after 01_schema.sql / 03_create_tables_all.sql.
    This script is idempotent and preserves existing tables. */
 USE PRJ_DB;
