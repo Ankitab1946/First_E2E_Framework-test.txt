@@ -924,11 +924,16 @@ with tab_dictionary:
                     uploaded_records = excel_service.parse_uploaded_file(uploaded_file.getvalue())
                     st.success(f"Uploaded file parsed successfully. Rows parsed: {len(uploaded_records)}")
                     uploaded_df = records_to_df(uploaded_records)
-                    edited_upload_df = st.data_editor(uploaded_df, use_container_width=True, height=350, num_rows="dynamic")
+                    preview_limit = 500
+                    if len(uploaded_df) > preview_limit:
+                        st.info(f"Fast-load mode: previewing the first {preview_limit:,} rows of {len(uploaded_df):,}. The full parsed workbook will be uploaded.")
+                        edited_upload_df = st.data_editor(uploaded_df.head(preview_limit), use_container_width=True, height=350, num_rows="dynamic")
+                    else:
+                        edited_upload_df = st.data_editor(uploaded_df, use_container_width=True, height=350, num_rows="dynamic")
                     if st.button("Upload Parsed Document to DB", type="primary"):
                         upload_records = [
                             {**row, "delta_type": "UPDATED"}
-                            for row in df_to_records(edited_upload_df)
+                            for row in (uploaded_records if len(uploaded_df) > preview_limit else df_to_records(edited_upload_df))
                             if row.get("prj_id")
                         ]
                         result = finalization_service.finalize(upload_records, user_id=user_id, source_module="UPLOAD_DOCUMENT")
