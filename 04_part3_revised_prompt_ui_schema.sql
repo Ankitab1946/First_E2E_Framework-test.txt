@@ -6,6 +6,14 @@ GO
 IF COL_LENGTH('dbo.master_dictionary','calculated_or_reported') IS NULL
     ALTER TABLE dbo.master_dictionary ADD calculated_or_reported NVARCHAR(100) NULL;
 GO
+IF COL_LENGTH('dbo.master_dictionary','calculation_logic_details') IS NULL
+    ALTER TABLE dbo.master_dictionary ADD calculation_logic_details NVARCHAR(MAX) NULL;
+GO
+/* Sign Flipping is a multiplier (for example -1), not a Yes/No flag. */
+IF COL_LENGTH('dbo.master_dictionary','sign_flipping') IS NOT NULL
+   AND EXISTS (SELECT 1 FROM sys.columns WHERE object_id=OBJECT_ID('dbo.master_dictionary') AND name='sign_flipping' AND system_type_id=104)
+    ALTER TABLE dbo.master_dictionary ALTER COLUMN sign_flipping NVARCHAR(100) NULL;
+GO
 IF OBJECT_ID('dbo.prj_attribute_master_test','U') IS NULL
 CREATE TABLE dbo.prj_attribute_master_test (
  id BIGINT IDENTITY PRIMARY KEY, prj_id NVARCHAR(100) NOT NULL UNIQUE,
@@ -65,7 +73,7 @@ CREATE TABLE dbo.PRJ_attr_business_logic_test2 (
  mapping_type NVARCHAR(255) NULL, calculation_in_prj NVARCHAR(MAX) NULL, editable_in_historicals BIT NULL,
  sign_flipping NVARCHAR(100) NULL, gc_template_attribute_name NVARCHAR(255) NULL,
  sp_standardize_attribute_name NVARCHAR(255) NULL, sp_standardize_dataitem_id NVARCHAR(100) NULL,
- sp_asreported_dataitem_id NVARCHAR(100) NULL, calculation_logic_details NVARCHAR(MAX) NULL,
+ sp_asreported_dataitem_id NVARCHAR(MAX) NULL, calculation_logic_details NVARCHAR(MAX) NULL,
  updates NVARCHAR(MAX) NULL, updated_on DATETIME2 NULL, zeus_attribute NVARCHAR(255) NULL,
  zeus_table_name NVARCHAR(255) NULL, zeus_description NVARCHAR(MAX) NULL, comments NVARCHAR(MAX) NULL,
  snl_dataitemid NVARCHAR(100) NULL, scanned_calculated NVARCHAR(100) NULL,
