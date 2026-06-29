@@ -1,0 +1,101 @@
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.orm import Mapped, mapped_column
+from DataDictionaryAdminApp.core.database import Base
+
+# All Part 3 configuration tables use the explicit *_test names requested.
+class PortfolioReference(Base):
+    __tablename__ = "prj_portfolio_reference_test"
+    port_ref_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    port_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    sector_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    sub_sector: Mapped[str | None] = mapped_column(String(100))
+    remark: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime())
+    updated_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime(), onupdate=func.sysutcdatetime())
+    created_by: Mapped[str] = mapped_column(String(100), default="sysuser", nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(100), default="sysuser", nullable=False)
+    __table_args__ = (UniqueConstraint("port_name", "sector_name", "sub_sector", name="uq_prj_portfolio_reference_test"),)
+
+class AttributePortfolioScope(Base):
+    __tablename__ = "prj_attribute_portfolio_scope_test"
+    scope_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    prj_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    port_ref_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("prj_portfolio_reference_test.port_ref_id"), nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime())
+    updated_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime(), onupdate=func.sysutcdatetime())
+    created_by: Mapped[str] = mapped_column(String(100), default="sysuser", nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(100), default="sysuser", nullable=False)
+    deleted_at: Mapped[object | None] = mapped_column(DateTime)
+    deleted_by: Mapped[str | None] = mapped_column(String(100))
+    __table_args__ = (UniqueConstraint("prj_id", "port_ref_id", name="uq_prj_attribute_portfolio_scope_test"),)
+
+class UiDisplayConfig(Base):
+    __tablename__ = "prj_ui_display_config_test"
+    display_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    scope_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("prj_attribute_portfolio_scope_test.scope_id"), nullable=False, index=True)
+    display_order: Mapped[int | None] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    section: Mapped[str | None] = mapped_column(String(500))
+    subsection: Mapped[str | None] = mapped_column(String(500))
+    view_name: Mapped[str | None] = mapped_column(String(500))
+    description: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime())
+    updated_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime(), onupdate=func.sysutcdatetime())
+    created_by: Mapped[str] = mapped_column(String(100), default="sysuser", nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(100), default="sysuser", nullable=False)
+    deleted_at: Mapped[object | None] = mapped_column(DateTime)
+    deleted_by: Mapped[str | None] = mapped_column(String(100))
+
+class AttributeBusinessRule(Base):
+    __tablename__ = "prj_attribute_business_rules_test"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    scope_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("prj_attribute_portfolio_scope_test.scope_id"), nullable=False, unique=True)
+    source_abbr_name: Mapped[str] = mapped_column(String(100), default="SNPAR", nullable=False)
+    editable: Mapped[bool | None] = mapped_column(Boolean)
+    symbol: Mapped[str | None] = mapped_column(String(50))
+    mapping_type: Mapped[str | None] = mapped_column(String(255))
+    mapping_logic: Mapped[str | None] = mapped_column(Text)
+    calculation_logic: Mapped[str | None] = mapped_column(Text)
+    business_logic: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime())
+    updated_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime(), onupdate=func.sysutcdatetime())
+    created_by: Mapped[str] = mapped_column(String(100), default="sysuser", nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(100), default="sysuser", nullable=False)
+    deleted_at: Mapped[object | None] = mapped_column(DateTime)
+    deleted_by: Mapped[str | None] = mapped_column(String(100))
+
+class PromptReference(Base):
+    __tablename__ = "prj_scanning_prompt_reference_test"
+    prompt_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    scope_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("prj_attribute_portfolio_scope_test.scope_id"), nullable=False, index=True)
+    prj_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    port_ref_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("prj_portfolio_reference_test.port_ref_id"), nullable=False)
+    required_by_scope: Mapped[str | None] = mapped_column(String(500))
+    attribute_name: Mapped[str | None] = mapped_column(String(500))
+    section: Mapped[str | None] = mapped_column(String(500))
+    sub_section: Mapped[str | None] = mapped_column(String(500))
+    data_type: Mapped[str | None] = mapped_column(String(100))
+    calculated_or_reported: Mapped[str | None] = mapped_column(String(100))
+    calculation_logic: Mapped[str | None] = mapped_column(Text)
+    segment: Mapped[str | None] = mapped_column(String(500))
+    subcomponent_total: Mapped[str | None] = mapped_column(String(500))
+    attribute_description: Mapped[str | None] = mapped_column(Text)
+    examples: Mapped[str | None] = mapped_column(Text)
+    source_sheet_name: Mapped[str | None] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime())
+    updated_at: Mapped[object] = mapped_column(DateTime, server_default=func.sysutcdatetime(), onupdate=func.sysutcdatetime())
+    created_by: Mapped[str] = mapped_column(String(100), default="sysuser", nullable=False)
+    updated_by: Mapped[str] = mapped_column(String(100), default="sysuser", nullable=False)
+    deleted_at: Mapped[object | None] = mapped_column(DateTime)
+    deleted_by: Mapped[str | None] = mapped_column(String(100))
+    __table_args__ = (UniqueConstraint("scope_id", "prj_id", "port_ref_id", name="uq_prj_scanning_prompt_reference_test"),)
