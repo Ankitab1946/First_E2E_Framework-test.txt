@@ -7,27 +7,28 @@ from openpyxl.worksheet.datavalidation import DataValidation
 class ExcelService:
     master_columns=['PRJ ID','PRJ Attribute Name','PRJ Attribute Description','PRJ Physical Attribute Name','Editable?','Calculated or Reported?','Percentage(%) / Ratio(X)','Calculation Logic','Where in financial statement is this generally collected from ?','Required by corporates?','Required by banks ?','Required by insurance?','Required by Downstream?','Version Update','Mapping Type (calculated/CAPIQ sourced/Manual Updates/Out of Scope)','Calculated in CFV? (Y/N)','Editable in Historicals screen in UCRS-CFV?(Y/N)','Sign Flipping (multiply by)','GC Template attribute name','S&P Standradisation dataitem id','S&P As-Reported dataitem ID / logic','Calculation Logic Details','Updates','Updated ON','Zeus attribute','Zeus table name','Zeus Description','Commnets','SNL dataitemid','Scanned/Calculated']
     def read_prompt_workbook(self, content, sheet_name):
-        """Read a Prompt worksheet with resilient header-row detection.
+        """Read prompt sheets with resilient header-row detection.
 
-        Prompt workbooks have been supplied with headers on different rows.  We inspect
-        the first 10 rows and select the row containing PRJID/PRJ ID plus an attribute
-        header, then read the sheet again using that row as pandas' header row.
+        A header can appear after title rows and may use spaces, underscores,
+        punctuation or descriptive text. We inspect the first 150 rows and select
+        the row containing a PRJ ID-like header plus an Attribute Name-like header.
         """
-        source = BytesIO(content)
-        raw = pd.read_excel(source, sheet_name=sheet_name, header=None, nrows=12)
+        raw = pd.read_excel(BytesIO(content), sheet_name=sheet_name, header=None, nrows=150)
 
         def norm(value):
-            return ''.join(ch for ch in str(value).lower() if ch.isalnum())
+            return ''.join(ch for ch in str(value).replace('\xa0', ' ').lower() if ch.isalnum())
 
-        header_row = 0
+        best_row, best_score = 0, -1
         for index, row in raw.iterrows():
-            values = [norm(value) for value in row.tolist() if pd.notna(value)]
-            has_prj = any(value in ('prjid', 'projectid') or value.startswith('prjid') for value in values)
-            has_attribute = any(value.startswith('attributename') or value.startswith('prjattribute') for value in values)
-            if has_prj and has_attribute:
-                header_row = int(index)
-                break
-        return pd.read_excel(BytesIO(content), sheet_name=sheet_name, header=header_row)
+            values = [norm(value) for value in row.tolist() if pd.notna(value) and str(value).strip()]
+            has_prj = any('prjid' in value or value.startswith('projectid') for value in values)
+            has_attribute = any(('attribute' in value and 'name' in value) or value.startswith('prjattribute') for value in values)
+            has_description = any('description' in value for value in values)
+            score = (5 if has_prj else 0) + (5 if has_attribute else 0) + (2 if has_description else 0)
+            if score > best_score:
+                best_row, best_score = int(index), score
+        # Do not fail here: normalise_prompt_columns provides a precise mapping error.
+        return pd.read_excel(BytesIO(content), sheet_name=sheet_name, header=best_row)
     def sheets(self,content): return pd.ExcelFile(BytesIO(content)).sheet_names
     def build_latest(self, rows):
         wb=Workbook(); ws=wb.active; ws.title='PRJ Data Dictionary Mapping'; ws['A1']='Data Dictionary Export'; ws['A2']=f'Generated: {datetime.utcnow().isoformat()}Z'
@@ -48,55 +49,52 @@ class ExcelService:
 
     @staticmethod
     def normalise_prompt_columns(df):
-        """Normalise Prompt workbook headers without relying on an exact Excel template.
+        """Map Prompt Excel headers flexibly.
 
-        Attribute name deliberately prefers any header beginning with `Attribute Name`,
-        for example `Attribute Name (to be Viewed on Historical and HITL)`.
-        This satisfies the agreed workbook contract even when descriptive suffixes change.
+        Any header containing both ``attribute`` and ``name`` maps to
+        ``attribute_name``. This covers current and future descriptive suffixes,
+        spaces, underscores and punctuation.
         """
         df = df.copy()
         df.columns = [str(c).replace('\xa0', ' ').strip() for c in df.columns]
 
-        def normalise_header(value):
-            # Keep a display-friendly normalisation and an identifier normalisation.
-            return ' '.join(str(value).replace('\xa0', ' ').replace('_', ' ').strip().lower().split())
+        def ident(value):
+            return ''.join(ch for ch in str(value).replace('\xa0', ' ').lower() if ch.isalnum())
 
-        def identifier(value):
-            return ''.join(character for character in normalise_header(value) if character.isalnum())
+        indexed = [(column, ident(column)) for column in df.columns]
 
-        def first(*names):
-            candidates = [(column, normalise_header(column), identifier(column)) for column in df.columns]
-            for name in names:
-                wanted = normalise_header(name)
-                wanted_id = identifier(name)
-                for column, candidate, candidate_id in candidates:
-                    # Supports Attribute Name, Attribute_Name, Attribute Name (...),
-                    # PRJ Attribute and PRJ Attribute Name without exact template coupling.
-                    if (candidate == wanted or candidate.startswith(wanted)
-                            or candidate_id == wanted_id or candidate_id.startswith(wanted_id)):
-                        return column
+        def match(*predicates):
+            for column, value in indexed:
+                if any(predicate(value) for predicate in predicates):
+                    return column
             return None
 
-        # Attribute Name must take precedence over the older PRJ Attribute label.
-        attribute_name_column = first('Attribute Name') or first('PRJ Attribute')
+        attribute_column = match(
+            lambda value: 'attribute' in value and 'name' in value,
+            lambda value: value.startswith('prjattribute'),
+            lambda value: value in {'attribute', 'prjattribute'},
+        )
         mapping = {
-            'prj_id': first('prjid', 'prj id'),
-            'attribute_name': attribute_name_column,
-            'attribute_description': first('Description'),
-            'section': first('Section'),
-            'sub_section': first('Sub-Section', 'Sub Section'),
-            'data_type': first('DATA TYPE', 'Data Type'),
-            'calculated_or_reported': first('Calculated or Reported'),
-            'calculation_logic': first('Calculation Logic'),
-            'segment': first('Segment'),
-            'display_order': first('Display Order'),
-            'examples': first('Examples'),
+            'prj_id': match(lambda value: 'prjid' in value, lambda value: value.startswith('projectid')),
+            'attribute_name': attribute_column,
+            'attribute_description': match(lambda value: value.startswith('description'), lambda value: 'description' in value),
+            'section': match(lambda value: value == 'section' or value.startswith('section')),
+            'sub_section': match(lambda value: value.startswith('subsection')),
+            'data_type': match(lambda value: value.startswith('datatype')),
+            'calculated_or_reported': match(lambda value: value.startswith('calculatedorreported')),
+            'calculation_logic': match(lambda value: value.startswith('calculationlogic')),
+            'segment': match(lambda value: value.startswith('segment')),
+            'display_order': match(lambda value: value.startswith('displayorder')),
+            'examples': match(lambda value: value.startswith('examples')),
         }
         if not mapping['prj_id']:
-            raise ValueError('Prompt worksheet is missing required column PRJID/PRJ ID.')
+            raise ValueError('Prompt worksheet is missing required column PRJID/PRJ ID. Detected headers: ' + ', '.join(map(str, df.columns)))
+        # Permit an attribute name to be absent for unusual legacy sheets: use the
+        # first descriptive attribute-like column or an empty value instead of
+        # preventing preview. The UI displays the selected mapping for review.
         if not mapping['attribute_name']:
-            raise ValueError('Prompt worksheet is missing an Attribute Name column. Use a column beginning with Attribute Name.')
-
+            fallback = match(lambda value: 'attribute' in value, lambda value: 'prj' in value and 'displayorder' not in value)
+            mapping['attribute_name'] = fallback
         out = pd.DataFrame()
         for target, column in mapping.items():
             out[target] = df[column] if column else None
