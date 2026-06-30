@@ -6,7 +6,28 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 class ExcelService:
     master_columns=['PRJ ID','PRJ Attribute Name','PRJ Attribute Description','PRJ Physical Attribute Name','Editable?','Calculated or Reported?','Percentage(%) / Ratio(X)','Calculation Logic','Where in financial statement is this generally collected from ?','Required by corporates?','Required by banks ?','Required by insurance?','Required by Downstream?','Version Update','Mapping Type (calculated/CAPIQ sourced/Manual Updates/Out of Scope)','Calculated in CFV? (Y/N)','Editable in Historicals screen in UCRS-CFV?(Y/N)','Sign Flipping (multiply by)','GC Template attribute name','S&P Standradisation dataitem id','S&P As-Reported dataitem ID / logic','Calculation Logic Details','Updates','Updated ON','Zeus attribute','Zeus table name','Zeus Description','Commnets','SNL dataitemid','Scanned/Calculated']
-    def read_prompt_workbook(self, content, sheet_name): return pd.read_excel(BytesIO(content), sheet_name=sheet_name)
+    def read_prompt_workbook(self, content, sheet_name):
+        """Read a Prompt worksheet with resilient header-row detection.
+
+        Prompt workbooks have been supplied with headers on different rows.  We inspect
+        the first 10 rows and select the row containing PRJID/PRJ ID plus an attribute
+        header, then read the sheet again using that row as pandas' header row.
+        """
+        source = BytesIO(content)
+        raw = pd.read_excel(source, sheet_name=sheet_name, header=None, nrows=12)
+
+        def norm(value):
+            return ''.join(ch for ch in str(value).lower() if ch.isalnum())
+
+        header_row = 0
+        for index, row in raw.iterrows():
+            values = [norm(value) for value in row.tolist() if pd.notna(value)]
+            has_prj = any(value in ('prjid', 'projectid') or value.startswith('prjid') for value in values)
+            has_attribute = any(value.startswith('attributename') or value.startswith('prjattribute') for value in values)
+            if has_prj and has_attribute:
+                header_row = int(index)
+                break
+        return pd.read_excel(BytesIO(content), sheet_name=sheet_name, header=header_row)
     def sheets(self,content): return pd.ExcelFile(BytesIO(content)).sheet_names
     def build_latest(self, rows):
         wb=Workbook(); ws=wb.active; ws.title='PRJ Data Dictionary Mapping'; ws['A1']='Data Dictionary Export'; ws['A2']=f'Generated: {datetime.utcnow().isoformat()}Z'
@@ -37,14 +58,22 @@ class ExcelService:
         df.columns = [str(c).replace('\xa0', ' ').strip() for c in df.columns]
 
         def normalise_header(value):
-            return ' '.join(str(value).replace('\xa0', ' ').strip().lower().split())
+            # Keep a display-friendly normalisation and an identifier normalisation.
+            return ' '.join(str(value).replace('\xa0', ' ').replace('_', ' ').strip().lower().split())
+
+        def identifier(value):
+            return ''.join(character for character in normalise_header(value) if character.isalnum())
 
         def first(*names):
-            candidates = [(column, normalise_header(column)) for column in df.columns]
+            candidates = [(column, normalise_header(column), identifier(column)) for column in df.columns]
             for name in names:
                 wanted = normalise_header(name)
-                for column, candidate in candidates:
-                    if candidate == wanted or candidate.startswith(wanted):
+                wanted_id = identifier(name)
+                for column, candidate, candidate_id in candidates:
+                    # Supports Attribute Name, Attribute_Name, Attribute Name (...),
+                    # PRJ Attribute and PRJ Attribute Name without exact template coupling.
+                    if (candidate == wanted or candidate.startswith(wanted)
+                            or candidate_id == wanted_id or candidate_id.startswith(wanted_id)):
                         return column
             return None
 
