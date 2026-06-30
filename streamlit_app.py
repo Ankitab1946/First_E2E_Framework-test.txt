@@ -44,6 +44,10 @@ PORTFOLIOS = ['FI Banks', 'Corporates', 'FI Insurance', 'Zeus Downstream', 'ALL'
 st.set_page_config(page_title='Data Dictionary Admin App', layout='wide')
 st.title(os.getenv('APP_NAME', 'Data Dictionary Streamlit Admin'))
 
+# Modal state is explicit so a normal Streamlit rerun does not reopen the modal repeatedly.
+st.session_state.setdefault('attribute_modal', None)
+st.session_state.setdefault('attribute_modal_opened', False)
+
 
 def _candidate_api_bases() -> list[str]:
     configured = normalize_api_base_url(os.getenv('API_BASE_URL', os.getenv('STREAMLIT_API_BASE_URL', API)))
@@ -105,8 +109,14 @@ with st.sidebar:
     st.caption(f"Server: {details.get('server') or 'Not configured'}")
     st.caption(f"Database: {details.get('database') or 'Not configured'}")
     st.caption(f"Database enabled: {details.get('database_enabled')}")
+    connection = api('GET', '/system/connection-status', quiet=True)
+    status = connection.json() if connection else {'connected': False, 'message': 'FastAPI connection-status endpoint unavailable'}
+    if status.get('connected'):
+        st.success(f"DB Connected: {status.get('server')} / {status.get('database')}")
+    else:
+        st.error(f"DB Not Connected: {status.get('message', 'Unknown database connection error')}")
     if not info:
-        st.warning('API environment endpoint is unavailable. Server details are shown from .env. Verify that FastAPI is started from this same project folder.')
+        st.warning('API environment endpoint is unavailable. Server details are shown from .env.')
     st.caption(f"API: {API}")
     user = st.text_input('Current User', value=os.getenv('USERNAME', os.getenv('DEFAULT_USER', 'sysuser')))
     if st.button('Refresh'):
@@ -200,64 +210,112 @@ with tab1:
     filters = {'portfolios': [] if 'ALL' in selected_portfolios else selected_portfolios, 'prj_id': filter_prj or None, 'attribute_name': filter_name or None, 'attribute_description': filter_desc or None, 'section': filter_section or None, 'overlapped_only': overlapped, 'include_deleted': include_deleted}
     result = api('POST', '/data-dictionary/filter', json=filters, alternatives=['/data-dictionary/attributes/filter'])
     rows = result.json() if result else []
+    if result and result.headers.get('X-Data-Dictionary-Warning'):
+        st.warning(result.headers['X-Data-Dictionary-Warning'])
+        if result.headers.get('X-Data-Dictionary-Error'): st.code(result.headers['X-Data-Dictionary-Error'], language='text')
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    b1, b2 = st.columns(2)
-    if b1.button('Add New Attribute'):
+    a1,a2,a3,a4 = st.columns(4)
+    if a1.button('Add New Attribute'):
         st.session_state['attribute_modal'] = 'create'
-    latest = api('GET', '/data-dictionary/download-latest', alternatives=['/data-dictionary/latest/download']) if b2.button('Generate Latest Excel') else None
-    if latest:
-        st.download_button('Download Latest Data', latest.content, 'data_dictionary_latest.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    modal = Modal('Create New Attribute', key='create-attribute-modal')
-    if st.session_state.get('attribute_modal') == 'create':
+        st.session_state['attribute_modal_opened'] = False
+        st.session_state.pop('edit_attribute_data', None)
+        st.session_state.pop('edit_attribute_unlocked', None)
+    if a2.button('Generate Latest Excel'):
+        latest=api('GET','/data-dictionary/download-latest',alternatives=['/data-dictionary/latest/download'])
+        if latest: st.download_button('Download Latest Data',latest.content,'data_dictionary_latest.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    selected_prj=a3.selectbox('Selected PRJ ID for actions',['']+[r.get('prj_id','') for r in rows])
+    if a3.button('Open Selected Attribute', disabled=not selected_prj):
+        selected_response = api('GET', f'/data-dictionary/attributes/{selected_prj}', quiet=False)
+        if selected_response:
+            st.session_state['edit_attribute_data'] = selected_response.json()
+            st.session_state['edit_attribute_unlocked'] = False
+            st.session_state['attribute_modal'] = 'edit'
+            st.session_state['attribute_modal_opened'] = False
+    if a4.button('Export to S3'):
+        export=api('POST',f'/s3/export?user={user}')
+        if export: st.success('S3 export completed: '+', '.join(export.json().get('keys',[])))
+    b1,b2=st.columns(2)
+    if b1.button('Soft Delete Attribute',disabled=not selected_prj):
+        r=api('DELETE',f'/data-dictionary/attributes/{selected_prj}?user={user}')
+        if r: st.success(f'{selected_prj} soft deleted.'); st.rerun()
+    if b2.button('Reactivate Soft Deleted Attribute',disabled=not selected_prj):
+        r=api('POST',f'/data-dictionary/attributes/{selected_prj}/reactivate?user={user}')
+        if r: st.success(f'{selected_prj} reactivated.'); st.rerun()
+    modal_mode = st.session_state.get('attribute_modal')
+    modal_title = 'Edit Attribute' if modal_mode == 'edit' else 'Create New Attribute'
+    modal = Modal(modal_title, key='attribute-modal')
+    if modal_mode in ('create', 'edit') and not st.session_state.get('attribute_modal_opened', False):
         modal.open()
-    if modal.is_open():
+        st.session_state['attribute_modal_opened'] = True
+    if modal_mode in ('create', 'edit') and modal.is_open():
         with modal.container():
-            render_attribute_form('create')
-            if st.button('Close Create Form'):
-                modal.close(); st.session_state.pop('attribute_modal', None); st.rerun()
+            if st.session_state.get('attribute_modal') == 'edit':
+                edit_data = st.session_state.get('edit_attribute_data', {})
+                st.subheader('Edit Attribute')
+                if not st.session_state.get('edit_attribute_unlocked', False):
+                    st.caption('Attribute is read-only. PRJ ID remains read-only after Edit is enabled.')
+                    st.json(edit_data)
+                    if st.button('Edit Attribute'):
+                        st.session_state['edit_attribute_unlocked'] = True
+                        st.rerun()
+                else:
+                    render_attribute_form('edit', edit_data)
+            else:
+                st.subheader('Create New Attribute')
+                render_attribute_form('create')
+            if st.button('Close Attribute Form'):
+                modal.close()
+                for key in ('attribute_modal', 'attribute_modal_opened', 'edit_attribute_data', 'edit_attribute_unlocked'):
+                    st.session_state.pop(key, None)
+                st.rerun()
 
 with tab2:
     bulk, manual = st.tabs(['Bulk Upload', 'Edit/Insert Prompts'])
     with bulk:
-        uploaded = st.file_uploader('Upload Prompt Excel', type=['xlsx'])
+        uploaded = st.file_uploader('Upload Prompt Excel', type=['xlsx'], key='prompt_upload_file')
         if uploaded:
-            r = api('POST', '/prompt-upload/sheets', quiet=False, files={'file': (uploaded.name, uploaded.getvalue(), uploaded.type)})
-            if r:
-                st.selectbox('Workbook sheet', r.json().get('sheets', []))
-                st.info('Sheet discovery is available. The final bulk preview, validation, delta and commit endpoints must be executed after the Excel mapping is finalized.')
+            file_tuple={'file':(uploaded.name,uploaded.getvalue(),uploaded.type or 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+            sheet_response=api('POST','/prompt-upload/sheets',quiet=True,files=file_tuple)
+            sheets=sheet_response.json().get('sheets',[]) if sheet_response else []
+            selected_sheet=st.selectbox('Workbook sheet',sheets,key='prompt_sheet') if sheets else None
+            if selected_sheet:
+                form={'sheet_name':(None,selected_sheet)}
+                if st.button('Load Selected Sheet'):
+                    preview=api('POST','/prompt-upload/preview',files=file_tuple,data=form)
+                    if preview: st.session_state['prompt_preview']=preview.json()
+                if st.session_state.get('prompt_preview'):
+                    data=st.session_state['prompt_preview']; st.success(f"Loaded {data['row_count']} rows from {data['sheet']}"); st.dataframe(pd.DataFrame(data['preview']),use_container_width=True,hide_index=True)
+                c1,c2=st.columns(2)
+                if c1.button('Validate and Compare Delta'):
+                    delta=api('POST','/prompt-upload/delta',files=file_tuple,data=form)
+                    if delta: st.session_state['prompt_delta']=delta.json()
+                if st.session_state.get('prompt_delta'):
+                    d=st.session_state['prompt_delta']; st.info(f"New: {d['new']} | Update candidates: {d['update_candidates']} | Valid rows: {d['valid_rows']} | Invalid PRJ IDs: {len(d['invalid_prj_ids'])}")
+                    if d['invalid_prj_ids']: st.warning('Invalid PRJ IDs: '+', '.join(d['invalid_prj_ids'][:20]))
+                    sql_mode = st.selectbox('Generate SQL mode', ['INSERT_ONLY', 'MERGE'], key='prompt_sql_mode')
+                    if st.button('Generate SQL Script'):
+                        sql_response = api('POST', f'/prompt-upload/generate-sql?mode={sql_mode}', files=file_tuple, data=form)
+                        if sql_response:
+                            st.download_button('Download generated SQL', sql_response.content, f'prompt_{sql_mode.lower()}.sql', mime='text/sql')
+                if c2.button('Commit Valid Rows to Database'):
+                    finalized=api('POST',f'/prompt-upload/finalize?user={user}',files=file_tuple,data=form)
+                    if finalized:
+                        payload=finalized.json(); st.success(f"Bulk upload completed. Inserted: {payload['inserted']}; Updated: {payload['updated']}; Rejected: {payload['rejected_count']}")
+                        if payload['rejected']: st.dataframe(pd.DataFrame(payload['rejected']),use_container_width=True)
     with manual:
         with st.form('prompt-form'):
             p1,p2,p3 = st.columns(3)
-            prj_id = p1.text_input('PRJ ID *')
-            prompt_id = p2.number_input('Prompt ID (leave 0 for new)', min_value=0, step=1)
-            scope_id = p3.number_input('Scope ID', min_value=0, step=1)
-            p4,p5,p6 = st.columns(3)
-            attr = p4.text_input('Attribute Name')
-            section = p5.selectbox('Section', [''] + sections)
-            sub_section = p6.text_input('Sub-Section')
-            p7,p8,p9 = st.columns(3)
-            data_type = p7.selectbox('DATA TYPE', ['', 'Amount', '%', 'Ratio', 'Actual'])
-            calc_report = p8.selectbox('Calculated or Reported', ['', 'Calculated', 'Reported'])
-            display = p9.number_input('Display Order', min_value=0, step=1)
-            calculation_logic = st.text_area('Calculation Logic')
-            segment = st.text_input('Segment')
-            description = st.text_area('Description')
-            examples = st.text_area('Examples')
-            required_scope = st.text_input('Required By Scope')
-            submitted = st.form_submit_button('Save Prompt')
+            prj_id = p1.text_input('PRJ ID *'); prompt_id = p2.number_input('Prompt ID (leave 0 for new)',min_value=0,step=1); p3.caption('Scope ID and Portfolio Reference are derived from the active PRJ scope.')
+            p4,p5,p6=st.columns(3); attr=p4.text_input('Attribute Name'); section=p5.selectbox('Section',['']+sections); sub_section=p6.text_input('Sub-Section')
+            p7,p8,p9=st.columns(3); data_type=p7.selectbox('DATA TYPE',['','Amount','%','Ratio','Actual']); calc_report=p8.selectbox('Calculated or Reported',['','Calculated','Reported']); display=p9.number_input('Display Order',min_value=0,step=1)
+            calculation_logic=st.text_area('Calculation Logic'); segment=st.text_input('Segment'); description=st.text_area('Description'); examples=st.text_area('Examples'); required_scope=st.text_input('Required By Scope'); submitted=st.form_submit_button('Save Prompt')
         if submitted:
-            payload = {'scope_id': scope_id or None, 'prj_id': prj_id, 'required_by_scope': required_scope, 'attribute_name': attr, 'section': section, 'sub_section': sub_section, 'data_type': data_type, 'calculated_or_reported': calc_report, 'calculation_logic': calculation_logic, 'segment': segment, 'attribute_description': description, 'examples': examples, 'display_order': display}
-            endpoint = '/prompts' if prompt_id == 0 else f'/prompts/{prompt_id}?user={user}'
-            method = 'POST' if prompt_id == 0 else 'PUT'
-            if api(method, endpoint, json=payload): st.success('Prompt saved successfully.')
+            payload={'scope_id':None,'prj_id':prj_id,'required_by_scope':required_scope,'attribute_name':attr,'section':section,'sub_section':sub_section,'data_type':data_type,'calculated_or_reported':calc_report,'calculation_logic':calculation_logic,'segment':segment,'attribute_description':description,'examples':examples,'display_order':display}
+            endpoint='/prompts' if prompt_id==0 else f'/prompts/{prompt_id}?user={user}'; method='POST' if prompt_id==0 else 'PUT'
+            if api(method,endpoint,json=payload): st.success('Prompt saved successfully.')
 
 with tab3:
     st.subheader('Audit History')
-    a1,a2,a3,a4 = st.columns(4)
-    table_name = a1.text_input('Table name')
-    record_key = a2.text_input('PRJ ID / Record Key')
-    action = a3.selectbox('Action', ['', 'INSERT', 'UPDATE', 'SOFT_DELETE', 'REACTIVATE', 'S3_EXPORT'])
-    performed_by = a4.text_input('Performed by')
-    audit = api('GET', '/audit', params={'table_name': table_name or None, 'record_key': record_key or None, 'action': action or None, 'performed_by': performed_by or None})
-    if audit:
-        st.dataframe(pd.DataFrame(audit.json()), use_container_width=True, hide_index=True)
+    a1,a2,a3,a4=st.columns(4); table_name=a1.text_input('Table name'); record_key=a2.text_input('PRJ ID / Record Key'); action=a3.selectbox('Action',['','INSERT','UPDATE','SOFT_DELETE','REACTIVATE','S3_EXPORT']); performed_by=a4.text_input('Performed by')
+    audit=api('GET','/audit',params={'table_name':table_name or None,'record_key':record_key or None,'action':action or None,'performed_by':performed_by or None})
+    if audit: st.dataframe(pd.DataFrame(audit.json()),use_container_width=True,hide_index=True)
