@@ -81,7 +81,40 @@ st.markdown("""
 [data-testid="stDataEditor"], [data-testid="stDataFrame"] { border:1px solid var(--dd-border) !important; border-radius:5px !important; overflow:hidden !important; background:#FFFFFF !important; }
 [data-testid="stDataEditor"] [role="columnheader"], [data-testid="stDataFrame"] [role="columnheader"] { background:var(--dd-grid-header) !important; color:#FFFFFF !important; font-weight:700 !important; }
 [data-testid="stDataEditor"] [role="gridcell"], [data-testid="stDataFrame"] [role="gridcell"] { color:var(--dd-text) !important; background:#FFFFFF !important; border-bottom:1px solid #E2EAF2 !important; }
-[data-testid="stSidebar"], [data-testid="stSidebar"] > div:first-child { background:var(--dd-primary-soft) !important; }
+/* Sidebar workspace panel: use the same light-blue tone as tabs/page heading. */
+[data-testid="stSidebar"],
+[data-testid="stSidebar"] > div,
+[data-testid="stSidebar"] [data-testid="stSidebarContent"],
+[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+  background:var(--dd-primary-soft) !important;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"],
+[data-testid="stSidebar"] [data-testid="stElementContainer"] {
+  background:transparent !important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [data-baseweb="input"] > div,
+[data-testid="stSidebar"] input {
+  background:#DCEBFA !important;
+  border-color:#86A7C8 !important;
+  color:#183D64 !important;
+}
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] strong {
+  color:#183D64 !important;
+}
+[data-testid="stSidebar"] hr { border-color:#B7C9DB !important; }
+[data-testid="stSidebar"] .stButton > button {
+  background:#DCEBFA !important;
+  border-color:#86A7C8 !important;
+  color:#183D64 !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+  background:#C8DDF2 !important;
+  border-color:#6F95BA !important;
+}
 </style>
 """, unsafe_allow_html=True)
 st.markdown(f"""
