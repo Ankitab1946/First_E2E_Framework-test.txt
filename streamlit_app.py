@@ -286,22 +286,45 @@ with tab1:
     if st.session_state['show_master_upload'] and is_admin:
         with st.expander('Upload, Compare and Finalize Master Dictionary',expanded=True):
             master=st.file_uploader('Master Dictionary Excel (.xlsx)',type=['xlsx'],key='master_upload')
+            diagnostic = api('GET', '/master-upload/diagnostic', quiet=True)
+            if diagnostic:
+                diagnostic_payload = diagnostic.json()
+                if diagnostic_payload.get('connected'):
+                    st.caption(f"Upload target: {diagnostic_payload.get('server')} / {diagnostic_payload.get('database')} | Existing master rows: {diagnostic_payload.get('master_row_count')}")
+                else:
+                    st.error('Master upload database diagnostic failed:')
+                    st.json(diagnostic_payload)
             if master:
                 files={'file':(master.name,master.getvalue(),master.type or 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
                 p=api('POST','/master-upload/preview',files=files)
-                if p: st.dataframe(pd.DataFrame(p.json().get('preview',[])),use_container_width=True,hide_index=True)
+                if p:
+                    preview_result = p.json()
+                    if preview_result.get('status') == 'failed':
+                        st.error('Master Dictionary preview failed. Detailed root cause:')
+                        st.json(preview_result)
+                    else:
+                        st.dataframe(pd.DataFrame(preview_result.get('preview',[])),use_container_width=True,hide_index=True)
                 m1,m2=st.columns(2)
                 if m1.button('Compare Master Dictionary'):
                     q=api('POST','/master-upload/delta',files=files)
-                    if q: st.json(q.json())
+                    if q:
+                        comparison = q.json()
+                        if comparison.get('status') == 'failed':
+                            st.error('Master Dictionary comparison failed. Detailed root cause:')
+                        st.json(comparison)
                 if m2.button('Finalize and Upload to Database'):
                     q=api('POST',f'/master-upload/finalize?user={st.session_state.current_user}',files=files)
                     if q:
-                        result=q.json(); st.success(str(result))
-                        if result.get('rejected'):
-                            st.error('Rejected rows with detailed root cause:')
-                            st.dataframe(pd.DataFrame(result['rejected']),use_container_width=True,hide_index=True)
-                        st.rerun()
+                        result=q.json()
+                        if result.get('status') == 'failed':
+                            st.error('Master Dictionary upload failed. Detailed root cause:')
+                            st.json(result)
+                        else:
+                            st.success(f"Master Dictionary upload completed. Inserted: {result.get('inserted',0)}, Updated: {result.get('updated',0)}, Rejected: {result.get('rejected_count',0)}")
+                            if result.get('rejected'):
+                                st.error('Rejected rows with detailed root cause:')
+                                st.dataframe(pd.DataFrame(result['rejected']),use_container_width=True,hide_index=True)
+                            st.rerun()
     with st.expander('View Deleted Attributes and Reactivate'):
         deleted_response=api('POST','/data-dictionary/filter',json={'portfolios':[],'include_deleted':True})
         deleted=[x for x in (deleted_response.json() if deleted_response else []) if not x.get('is_active')]
