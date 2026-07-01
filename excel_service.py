@@ -28,54 +28,50 @@ class ExcelService:
         return pd.ExcelFile(BytesIO(content)).sheet_names
 
     def read_prompt_workbook(self, content, sheet_name):
-        """Read a Prompt worksheet with resilient header discovery.
+        """Read a Prompt workbook with business-header scoring.
 
-        The business workbook is allowed to vary in descriptive suffixes. The
-        selected worksheet is accepted when it has a PRJ identifier header;
-        attribute-name mapping is then resolved independently and never mapped
-        from CFVID.
+        The selected header row is the row that contains a PRJ identifier and the
+        highest number of Prompt Management business headings. This supports the
+        verbose headers used in the supplied workbook, including
+        ``Attribute Name( to be Viewed on Historical and HITL)``.
         """
         raw = pd.read_excel(BytesIO(content), sheet_name=sheet_name, header=None, dtype=object)
         scan_limit = min(len(raw.index), 500)
 
-        def cleaned(value):
+        def ident(value):
             return self._identifier(value)
+        def score(values):
+            ids=[ident(v) for v in values if pd.notna(v) and str(v).strip()]
+            has_prj=any(v in {'prjid','cfvid'} or v.startswith('prjid') or v.startswith('projectid') for v in ids)
+            if not has_prj:
+                return -1
+            markers=('attributename','displayorder','section','subsection','datatype','calculatedorreported','calculationlogic','segment','description')
+            return sum(any(marker in v for v in ids) for marker in markers)
 
-        def has_prj(values):
-            return any(v in {'prjid', 'cfvid'} or v.startswith('prjid') or v.startswith('projectid') for v in values)
-
-        candidates = []
+        candidates=[]
         for idx in range(scan_limit):
-            one = [cleaned(v) for v in raw.iloc[idx].tolist() if pd.notna(v) and str(v).strip()]
-            if has_prj(one):
-                score = sum(1 for v in one if v.startswith('attributename') or ('attribute' in v and 'name' in v))
-                candidates.append((idx, 1, score))
-            if idx + 1 < scan_limit:
-                combined = []
-                for a, b in zip(raw.iloc[idx].tolist(), raw.iloc[idx + 1].tolist()):
-                    combined.append(cleaned(f"{'' if pd.isna(a) else a} {'' if pd.isna(b) else b}"))
-                if has_prj(combined):
-                    score = sum(1 for v in combined if v.startswith('attributename') or ('attribute' in v and 'name' in v))
-                    candidates.append((idx, 2, score))
+            one=list(raw.iloc[idx].tolist())
+            one_score=score(one)
+            if one_score >= 0:
+                candidates.append((one_score, 1, idx, one))
+            if idx+1 < scan_limit:
+                combined=[]
+                for a,b in zip(raw.iloc[idx].tolist(), raw.iloc[idx+1].tolist()):
+                    av='' if pd.isna(a) else str(a).strip(); bv='' if pd.isna(b) else str(b).strip()
+                    combined.append((av + (' ' if av and bv else '') + bv).strip())
+                two_score=score(combined)
+                if two_score >= 0:
+                    candidates.append((two_score, 2, idx, combined))
         if not candidates:
-            headers = [str(v) for v in raw.iloc[:min(scan_limit, 30)].fillna('').values.flatten() if str(v).strip()]
-            raise ValueError("Prompt worksheet is missing required PRJID/PRJ ID/CFVID column. Detected values: " + ', '.join(headers[:120]))
-
-        # Prefer a row that has an Attribute Name-like header, then choose a normal
-        # one-row header over a merged two-row header when tied.
-        idx, rows, _ = max(candidates, key=lambda x: (x[2], -x[1], -x[0]))
-        if rows == 2:
-            headers = []
-            for a, b in zip(raw.iloc[idx].tolist(), raw.iloc[idx + 1].tolist()):
-                av = '' if pd.isna(a) else str(a).strip()
-                bv = '' if pd.isna(b) else str(b).strip()
-                headers.append((av + (' ' if av and bv else '') + bv).strip())
-            data = raw.iloc[idx + 2:].copy()
-        else:
-            headers = [str(x).strip() if pd.notna(x) else '' for x in raw.iloc[idx].tolist()]
-            data = raw.iloc[idx + 1:].copy()
-        data.columns = headers
-        data = data.loc[:, [str(c).strip() != '' for c in data.columns]]
+            detected=[str(v) for v in raw.iloc[:min(scan_limit,30)].fillna('').values.flatten() if str(v).strip()]
+            raise ValueError('Prompt worksheet is missing required PRJID/PRJ ID/CFVID column. Detected headers: ' + ', '.join(detected[:120]))
+        # Highest prompt business-header score wins. Prefer ordinary one-row header on tie.
+        _, rows, idx, headers=max(candidates,key=lambda x:(x[0], -x[1], -x[2]))
+        if rows==1:
+            headers=[str(x).strip() if pd.notna(x) else '' for x in headers]
+        data=raw.iloc[idx+rows:].copy()
+        data.columns=headers
+        data=data.loc[:, [str(c).strip() != '' and not str(c).lower().startswith('unnamed') for c in data.columns]]
         return data.reset_index(drop=True)
 
     @staticmethod
@@ -101,7 +97,7 @@ class ExcelService:
 
         mapping = {
             'prj_id': first(lambda c,i: i in {'prjid','cfvid'} or i.startswith('prjid') or i.startswith('projectid')),
-            'attribute_name': first(lambda c,i: i.startswith('attributename'), lambda c,i: 'attributename' in i, lambda c,i: ('attribute' in i and 'name' in i), lambda c,i: i.startswith('prjattribute')),
+            'attribute_name': first(lambda c,i: i.startswith('attributename'), lambda c,i: 'attributename' in i, lambda c,i: ('attribute' in i and 'name' in i), lambda c,i: i.startswith('prjattribute'), lambda c,i: i.startswith('attribute')),
             'display_order': first(lambda c,i: i.startswith('displayorder')),
             'section': first(lambda c,i: i.startswith('section')),
             'sub_section': first(lambda c,i: i.startswith('subsection')),
