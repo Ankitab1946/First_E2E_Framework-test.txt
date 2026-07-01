@@ -78,7 +78,8 @@ async def finalize_master(file:UploadFile=File(...), user:str|None=Query(None), 
     try:
         df=ExcelService().read_master_workbook(await file.read())
     except Exception as exc:
-        raise HTTPException(400, f'Unable to parse Master Dictionary workbook: {exc}')
+        logger.exception('Master Dictionary workbook parsing failed')
+        raise HTTPException(400, {'message':'Unable to parse Master Dictionary workbook','error_type':type(exc).__name__,'reason':str(getattr(exc, 'orig', exc)),'trace_hint':'See FastAPI console log for the full traceback.'})
 
     service=DataDictionaryService(db); inserted=updated=0; rejected=[]
     for row_no,(_,row) in enumerate(df.iterrows(), start=4):
