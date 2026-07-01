@@ -3,7 +3,7 @@ from sqlalchemy import text, select
 from sqlalchemy.orm import Session
 from DataDictionaryAdminApp.model.entities import AttributeMaster, PortfolioReference, ScanningPromptReference, AuditTable
 
-PORTFOLIO_ALIASES = {"FI Banks": "Banks", "FI Insurance": "Insurance", "Corporates": "Corporate", "Zeus Downstream": "Zeus Downstream"}
+PORTFOLIO_ALIASES = {"FI Banks": "FI Banks", "FI Insurance": "FI Insurance", "Corporates": "Corporates", "Zeus Downstream": "Zeus Downstream"}
 
 class DataDictionaryRepository:
     def __init__(self, db: Session): self.db = db
@@ -40,13 +40,23 @@ class DataDictionaryRepository:
                 key = f'portfolio_{index}'
                 params[key] = name
                 placeholders.append(f':{key}')
+            # FI Banks / FI Insurance are represented by port_name='FI' and sector_name.
             conditions.append("""(
-                SELECT COUNT(DISTINCT p.port_name)
+                SELECT COUNT(DISTINCT CASE
+                    WHEN LOWER(p.port_name)='fi' AND LOWER(p.sector_name)='banks' THEN 'FI Banks'
+                    WHEN LOWER(p.port_name)='fi' AND LOWER(p.sector_name)='insurance' THEN 'FI Insurance'
+                    WHEN LOWER(p.port_name)='corporate' THEN 'Corporates'
+                    WHEN LOWER(p.port_name)='zeus downstream' THEN 'Zeus Downstream'
+                    ELSE p.port_name END)
                 FROM dbo.prj_attribute_portfolio_scope_test AS s
                 INNER JOIN dbo.prj_portfolio_reference_test AS p ON p.port_ref_id = s.port_ref_id
-                WHERE s.prj_id = m.prj_id
-                  AND s.is_active = 1
-                  AND p.port_name IN (""" + ','.join(placeholders) + ") ) = :portfolio_count")
+                WHERE s.prj_id = m.prj_id AND s.is_active = 1
+                  AND (CASE
+                    WHEN LOWER(p.port_name)='fi' AND LOWER(p.sector_name)='banks' THEN 'FI Banks'
+                    WHEN LOWER(p.port_name)='fi' AND LOWER(p.sector_name)='insurance' THEN 'FI Insurance'
+                    WHEN LOWER(p.port_name)='corporate' THEN 'Corporates'
+                    WHEN LOWER(p.port_name)='zeus downstream' THEN 'Zeus Downstream'
+                    ELSE p.port_name END) IN (""" + ','.join(placeholders) + ") ) = :portfolio_count")
         if filters.overlapped_only:
             conditions.append("(SELECT COUNT(*) FROM dbo.prj_attribute_portfolio_scope_test AS os WHERE os.prj_id=m.prj_id AND os.is_active=1) > 1")
         where_clause = ' WHERE ' + ' AND '.join(conditions) if conditions else ''
@@ -61,8 +71,8 @@ class DataDictionaryRepository:
                 m.version_update,
                 m.where_in_financial_statement,
                 MAX(CASE WHEN pr.port_name='Corporate' AND s.is_active=1 THEN 'Y' ELSE 'N' END) AS required_by_corporates,
-                MAX(CASE WHEN pr.port_name='Banks' AND s.is_active=1 THEN 'Y' ELSE 'N' END) AS required_by_fi_banks,
-                MAX(CASE WHEN pr.port_name='Insurance' AND s.is_active=1 THEN 'Y' ELSE 'N' END) AS required_by_fi_insurance,
+                MAX(CASE WHEN pr.port_name='FI' AND pr.sector_name='Banks' AND s.is_active=1 THEN 'Y' ELSE 'N' END) AS required_by_fi_banks,
+                MAX(CASE WHEN pr.port_name='FI' AND pr.sector_name='Insurance' AND s.is_active=1 THEN 'Y' ELSE 'N' END) AS required_by_fi_insurance,
                 MAX(CASE WHEN pr.port_name='Zeus Downstream' AND s.is_active=1 THEN 'Y' ELSE 'N' END) AS required_by_zeus_downstream,
                 m.calculated_or_reported,
                 m.calculation_logic,
