@@ -128,7 +128,7 @@ class ExcelService:
         output = pd.DataFrame({target: (df[column] if column else None) for target, column in mapping.items()})
         output['prj_id'] = output['prj_id'].astype(str).str.strip()
         output = output[(output['prj_id'] != '') & (output['prj_id'].str.lower() != 'nan')]
-        mapping['_warning'] = None if mapping['attribute_name'] else "No Attribute Name-like column was matched; attribute_name will be blank until the workbook header is corrected."
+        mapping['_warning'] = None if mapping['attribute_name'] else "No Attribute Name-like column was matched. Preview was loaded; inspect the mapping before finalizing."
         return output, mapping
 
     @staticmethod
