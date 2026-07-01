@@ -39,7 +39,7 @@ st.markdown("""
 :root {
   --dd-primary:#315A86; --dd-primary-dark:#24486F; --dd-primary-soft:#EAF2FB;
   --dd-sidebar:#EAF2FB; --dd-border:#B7C9DB; --dd-bg:#F8FAFC; --dd-surface:#FFFFFF;
-  --dd-text:#172033; --dd-muted:#52677E; --dd-button:#3E6F9D; --dd-button-hover:#315A86;
+  --dd-text:#172033; --dd-muted:#52677E; --dd-button:#DCEBFA; --dd-button-hover:#C8DDF2;
   --dd-grid-header:#2D557E; --dd-grid-row:#FFFFFF;
 }
 .stApp { background:var(--dd-bg); color:var(--dd-text); }
@@ -50,7 +50,7 @@ st.markdown("""
 .dd-hero p { margin:.25rem 0 0; font-size:.9rem; color:var(--dd-muted); }
 .dd-section-label { font-size:.76rem; text-transform:uppercase; letter-spacing:.07em; color:var(--dd-primary); font-weight:750; margin-bottom:.3rem; }
 .dd-grid-title { color:var(--dd-primary-dark); font-size:1.05rem; font-weight:750; margin:.15rem 0 .55rem; }
-[data-testid="stSidebar"] { background:var(--dd-sidebar); border-right:1px solid var(--dd-border); }
+[data-testid="stSidebar"], [data-testid="stSidebar"] > div:first-child { background:var(--dd-primary-soft) !important; border-right:1px solid var(--dd-border); }
 [data-testid="stSidebar"] * { color:var(--dd-text); }
 [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color:var(--dd-muted) !important; }
 [data-testid="stSidebar"] [data-baseweb="select"] > div, [data-testid="stSidebar"] input { background:#FFFFFF !important; color:var(--dd-text) !important; border-color:var(--dd-border) !important; }
@@ -59,9 +59,9 @@ st.markdown("""
 .stTabs [data-baseweb="tab"] { height:38px; padding:0 .9rem; color:var(--dd-primary-dark); font-weight:700; background:#F0F5FA; border:1px solid #C6D6E5; border-radius:6px; }
 .stTabs [data-baseweb="tab"]:hover { background:#E4EFF9; color:var(--dd-primary-dark); }
 .stTabs [aria-selected="true"] { background:#DCEBFA !important; color:#183D64 !important; border:1px solid #86A7C8 !important; box-shadow:inset 0 -3px 0 #4D7DAA; }
-.stButton > button, .stDownloadButton > button { border-radius:5px; min-height:2.25rem; font-weight:700; border-color:var(--dd-button); color:#FFFFFF; background:var(--dd-button); }
-.stButton > button[kind="primary"] { background:var(--dd-primary); border-color:var(--dd-primary); color:#FFFFFF; }
-.stButton > button:hover, .stDownloadButton > button:hover { border-color:var(--dd-button-hover) !important; background:var(--dd-button-hover) !important; color:#FFFFFF !important; }
+.stButton > button, .stDownloadButton > button { border-radius:5px; min-height:2.25rem; font-weight:700; border-color:#86A7C8; color:#183D64; background:var(--dd-button); }
+.stButton > button[kind="primary"] { background:var(--dd-button); border-color:#86A7C8; color:#183D64; }
+.stButton > button:hover, .stDownloadButton > button:hover { border-color:#6F95BA !important; background:var(--dd-button-hover) !important; color:#183D64 !important; }
 [data-testid="stExpander"] { background:#FFFFFF; border:1px solid var(--dd-border); border-radius:6px; }
 [data-testid="stDataFrame"] { border:1px solid var(--dd-border); border-radius:5px; overflow:hidden; background:#FFFFFF; }
 [data-testid="stDataFrame"] [role="columnheader"] { background:var(--dd-grid-header) !important; color:#FFFFFF !important; font-weight:750 !important; }
@@ -76,6 +76,12 @@ st.markdown("""
 .dd-grid-searchbar { background:#F7FAFD; border:1px solid var(--dd-border); border-radius:6px; padding:.5rem .65rem .25rem; margin:.15rem 0 .55rem; }
 [data-testid="stVerticalBlockBorderWrapper"] { border-color:#D6E0EB !important; border-radius:5px !important; background:#FFFFFF; }
 .stAlert, [data-testid="stToast"] { border-radius:6px !important; }
+
+/* Final simple-grid overrides */
+[data-testid="stDataEditor"], [data-testid="stDataFrame"] { border:1px solid var(--dd-border) !important; border-radius:5px !important; overflow:hidden !important; background:#FFFFFF !important; }
+[data-testid="stDataEditor"] [role="columnheader"], [data-testid="stDataFrame"] [role="columnheader"] { background:var(--dd-grid-header) !important; color:#FFFFFF !important; font-weight:700 !important; }
+[data-testid="stDataEditor"] [role="gridcell"], [data-testid="stDataFrame"] [role="gridcell"] { color:var(--dd-text) !important; background:#FFFFFF !important; border-bottom:1px solid #E2EAF2 !important; }
+[data-testid="stSidebar"], [data-testid="stSidebar"] > div:first-child { background:var(--dd-primary-soft) !important; }
 </style>
 """, unsafe_allow_html=True)
 st.markdown(f"""
@@ -178,95 +184,79 @@ def _grid_widths(columns, selectable=False):
     return widths
 
 def render_row_radio_grid(rows, *, key: str, title: str, id_field: str, label_builder=None):
-    """Audit-style visible grid with search and click-to-sort headers; selection stays in the first grid column."""
+    """Render the original simple Streamlit grid with a single selectable record.
+
+    The grid intentionally uses st.data_editor instead of the custom card-like layout.
+    It keeps a visible first-column selection control and preserves existing edit/delete flows.
+    """
     if not rows:
         st.info('No records found.')
         return ''
-    selectable=[r for r in rows if r.get(id_field) not in (None,'')]
+    selectable = [r for r in rows if r.get(id_field) not in (None, '')]
     if not selectable:
         st.info('No selectable records found.')
         return ''
-    labels=_grid_labels(); display_columns=_grid_columns(selectable,id_field)
-    search_text=st.text_input('Search grid', key=f'{key}__search', placeholder='Search any value in this grid').strip().lower()
-    sort_state=f'{key}__sort'; desc_state=f'{key}__desc'
-    if sort_state not in st.session_state: st.session_state[sort_state]=display_columns[0]
-    if desc_state not in st.session_state: st.session_state[desc_state]=False
-    filtered=selectable
+
+    labels = _grid_labels()
+    display_columns = _grid_columns(selectable, id_field)
+    search_text = st.text_input('Search grid', key=f'{key}__search', placeholder='Search any value in this grid').strip().lower()
+    filtered = selectable
     if search_text:
-        filtered=[r for r in selectable if search_text in ' '.join(str(r.get(c,'') or '') for c in display_columns).lower()]
-    sort_by=st.session_state[sort_state]
-    filtered=sorted(filtered,key=lambda r:str(r.get(sort_by,'') or '').lower(),reverse=st.session_state[desc_state])
+        filtered = [r for r in selectable if search_text in ' '.join(str(r.get(c, '') or '') for c in display_columns).lower()]
     if not filtered:
-        st.info('No records match the current search.'); return ''
-    selected_state=f'{key}__selected_id'; active_ids={str(r.get(id_field)) for r in selectable}
-    if st.session_state.get(selected_state) not in active_ids: st.session_state[selected_state]=''
-    row_keys=[f'{key}__pick_{str(r.get(id_field))}_{idx}' for idx,r in enumerate(filtered)]
-    def pick(changed_key, record_id):
-        if st.session_state.get(changed_key):
-            for row_key in row_keys:
-                if row_key != changed_key: st.session_state[row_key]=False
-            st.session_state[selected_state]=record_id
-        elif st.session_state.get(selected_state)==record_id:
-            st.session_state[selected_state]=''
-    def sort_click(column):
-        if st.session_state.get(sort_state)==column: st.session_state[desc_state]=not st.session_state.get(desc_state,False)
-        else:
-            st.session_state[sort_state]=column; st.session_state[desc_state]=False
-    widths=_grid_widths(display_columns,selectable=True)
-    st.markdown('<div class="dd-grid-shell">',unsafe_allow_html=True)
-    st.markdown(f'<div class="dd-grid-title" style="padding:.55rem .65rem 0;">{title}</div>',unsafe_allow_html=True)
-    header=st.columns(widths,gap='small')
-    header[0].markdown('<div class="dd-grid-header"><p>Select</p></div>',unsafe_allow_html=True)
-    for col, cell in zip(display_columns,header[1:]):
-        indicator=(' ↓' if st.session_state[desc_state] else ' ↑') if st.session_state[sort_state]==col else ' ↕'
-        with cell:
-            st.markdown('<div class="dd-grid-header-button">',unsafe_allow_html=True)
-            st.button(labels.get(col,col.replace('_',' ').title())+indicator,key=f'{key}__header_{col}',use_container_width=True,on_click=sort_click,args=(col,))
-            st.markdown('</div>',unsafe_allow_html=True)
-    for index,row in enumerate(filtered):
-        record_id=str(row.get(id_field)); state_key=row_keys[index]
-        if state_key not in st.session_state: st.session_state[state_key]=st.session_state.get(selected_state)==record_id
-        cells=st.columns(widths,gap='small')
-        with cells[0]:
-            st.checkbox('',key=state_key,label_visibility='collapsed',on_change=pick,args=(state_key,record_id))
-        for col,cell in zip(display_columns,cells[1:]):
-            value=row.get(col,'')
-            cell.markdown(f'<div class="dd-grid-row"><p>{"" if value is None else str(value)}</p></div>',unsafe_allow_html=True)
-    st.markdown('</div>',unsafe_allow_html=True)
-    st.caption('Use Search to filter. Click a column heading to sort. Select exactly one record for available actions.')
-    return st.session_state.get(selected_state,'')
+        st.info('No records match the current search.')
+        return ''
+
+    selected_state = f'{key}__selected_id'
+    active_ids = {str(r.get(id_field)) for r in selectable}
+    if st.session_state.get(selected_state) not in active_ids:
+        st.session_state[selected_state] = ''
+
+    table_rows = []
+    for row in filtered:
+        record_id = str(row.get(id_field))
+        item = {'Select': record_id == st.session_state.get(selected_state, '')}
+        for col in display_columns:
+            item[labels.get(col, col.replace('_', ' ').title())] = row.get(col, '')
+        item['_record_id'] = record_id
+        table_rows.append(item)
+    frame = pd.DataFrame(table_rows)
+    visible_columns = ['Select'] + [labels.get(col, col.replace('_', ' ').title()) for col in display_columns]
+
+    st.markdown(f'<div class="dd-grid-title">{title}</div>', unsafe_allow_html=True)
+    edited = st.data_editor(
+        frame[visible_columns],
+        key=f'{key}__table',
+        hide_index=True,
+        use_container_width=True,
+        disabled=[col for col in visible_columns if col != 'Select'],
+        column_config={
+            'Select': st.column_config.CheckboxColumn('Select', help='Select one record for available actions', default=False, width='small')
+        },
+    )
+    selected_indexes = edited.index[edited['Select'].fillna(False)].tolist()
+    if len(selected_indexes) > 1:
+        # Preserve single-record operation. The most recently displayed selected row is used.
+        selected_indexes = [selected_indexes[-1]]
+        st.warning('Only one record can be selected at a time. The last selected record will be used.')
+    selected_id = frame.loc[selected_indexes[0], '_record_id'] if selected_indexes else ''
+    st.session_state[selected_state] = selected_id
+    st.caption('Use the table header to sort. Use Search grid to filter. Select one record for available actions.')
+    return selected_id
+
 
 def render_audit_grid(rows, *, key='audit_grid'):
+    """Use Streamlit's original simple dataframe grid for Audit History."""
     if not rows:
-        st.info('No audit history found.'); return
-    labels=_grid_labels(); columns=list(rows[0].keys())[:10]
-    search=st.text_input('Search Audit History',key=f'{key}__search',placeholder='Search any audit value').strip().lower()
-    sort_state=f'{key}__sort'; desc_state=f'{key}__desc'
-    if sort_state not in st.session_state: st.session_state[sort_state]=columns[0]
-    if desc_state not in st.session_state: st.session_state[desc_state]=True
-    filtered=rows
+        st.info('No audit history found.')
+        return
+    frame = pd.DataFrame(rows)
+    search = st.text_input('Search Audit History', key=f'{key}__search', placeholder='Search any audit value').strip().lower()
     if search:
-        filtered=[r for r in rows if search in ' '.join(str(r.get(c,'') or '') for c in columns).lower()]
-    filtered=sorted(filtered,key=lambda r:str(r.get(st.session_state[sort_state],'') or '').lower(),reverse=st.session_state[desc_state])
-    widths=_grid_widths(columns,selectable=False)
-    def sort_click(column):
-        if st.session_state.get(sort_state)==column: st.session_state[desc_state]=not st.session_state.get(desc_state,False)
-        else: st.session_state[sort_state]=column; st.session_state[desc_state]=False
-    st.markdown('<div class="dd-grid-shell">',unsafe_allow_html=True)
-    header=st.columns(widths,gap='small')
-    for col,cell in zip(columns,header):
-        indicator=(' ↓' if st.session_state[desc_state] else ' ↑') if st.session_state[sort_state]==col else ' ↕'
-        with cell:
-            st.markdown('<div class="dd-grid-header-button">',unsafe_allow_html=True)
-            st.button(labels.get(col,col.replace('_',' ').title())+indicator,key=f'{key}__header_{col}',use_container_width=True,on_click=sort_click,args=(col,))
-            st.markdown('</div>',unsafe_allow_html=True)
-    for row in filtered:
-        cells=st.columns(widths,gap='small')
-        for col,cell in zip(columns,cells):
-            value=row.get(col,'')
-            cell.markdown(f'<div class="dd-grid-row"><p>{"" if value is None else str(value)}</p></div>',unsafe_allow_html=True)
-    st.markdown('</div>',unsafe_allow_html=True)
-    st.caption('Use Search to filter. Click a column heading to sort.')
+        mask = frame.astype(str).apply(lambda col: col.str.lower().str.contains(search, na=False)).any(axis=1)
+        frame = frame[mask]
+    st.dataframe(frame, use_container_width=True, hide_index=True)
+    st.caption('Use table headers to sort. Use Search Audit History to filter.')
 
 def keep_one_active_attribute_selection():
     """Retain only the most recently selected grid checkbox."""
