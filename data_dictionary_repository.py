@@ -90,7 +90,7 @@ class DataDictionaryRepository:
         """Return the static portfolio reference rows used to derive attribute scopes."""
         stmt = select(PortfolioReference)
         if active_only:
-            stmt = stmt.where(PortfolioReference.is_active.is_(True))
+            stmt = stmt.where(PortfolioReference.is_active == True)
         return list(self.db.scalars(stmt.order_by(PortfolioReference.port_ref_id)).all())
 
     def get_attribute(self, prj_id): return self.db.get(AttributeMaster, prj_id)
