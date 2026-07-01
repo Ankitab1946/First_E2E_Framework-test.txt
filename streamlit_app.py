@@ -58,40 +58,10 @@ st.markdown("""
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] { background:transparent !important; }
 [data-testid="stSidebar"] * { color:var(--dd-text); }
 [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color:var(--dd-muted) !important; }
-/* Sidebar widgets follow the same light-blue tab theme while preserving high contrast text. */
-[data-testid="stSidebar"] label,
-[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
-[data-testid="stSidebar"] .stMarkdown p,
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 {
-  color:#24486F !important;
-  font-weight:650 !important;
+[data-testid="stSidebar"] [data-baseweb="select"] > div, [data-testid="stSidebar"] input {
+  background:#FFFFFF !important; color:var(--dd-text) !important; border-color:#C6D6E5 !important;
 }
-[data-testid="stSidebar"] [data-baseweb="select"] > div,
-[data-testid="stSidebar"] input {
-  background:#EAF2FB !important;
-  color:#172033 !important;
-  border:1px solid #86A7C8 !important;
-  box-shadow:none !important;
-}
-[data-testid="stSidebar"] [data-baseweb="select"] span,
-[data-testid="stSidebar"] [data-baseweb="select"] svg,
-[data-testid="stSidebar"] input {
-  color:#172033 !important;
-  fill:#24486F !important;
-}
-[data-testid="stSidebar"] .stButton > button {
-  background:#DCEBFA !important;
-  border:1px solid #86A7C8 !important;
-  color:#183D64 !important;
-  font-weight:700 !important;
-}
-[data-testid="stSidebar"] .stButton > button:hover {
-  background:#C8DDF2 !important;
-  border-color:#6F95BA !important;
-  color:#183D64 !important;
-}
+[data-testid="stSidebar"] .stButton > button { background:var(--dd-button) !important; border-color:#86A7C8 !important; color:#183D64 !important; }
 /* Highlight individual tabs only, never the whole tab strip */
 .stTabs [data-baseweb="tab-list"] { gap:.45rem; border-bottom:0; background:transparent; padding:0 0 .45rem; }
 .stTabs [data-baseweb="tab"] { height:38px; padding:0 .9rem; color:var(--dd-primary-dark); font-weight:700; background:#F0F5FA; border:1px solid #C6D6E5; border-radius:6px; }
