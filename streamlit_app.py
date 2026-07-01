@@ -139,7 +139,19 @@ with tab1:
     r=api('POST','/data-dictionary/filter',json={'portfolios':[] if 'ALL' in pf else pf,'prj_id':prj or None,'attribute_name':name or None,'attribute_description':desc or None,'section':section or None,'include_deleted':include_deleted,'overlapped_only':overlap})
     rows=r.json() if r else []
     st.session_state['rows']=rows
-    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    grid_df = pd.DataFrame(rows)
+    if not grid_df.empty:
+        grid_df.insert(0, 'Select', False)
+        edited_grid = st.data_editor(grid_df, hide_index=True, use_container_width=True,
+                                     column_config={'Select': st.column_config.CheckboxColumn('Select', help='Select one record to edit or soft delete')},
+                                     disabled=[column for column in grid_df.columns if column != 'Select'], key='attribute_grid_editor')
+        selected_rows = edited_grid[edited_grid['Select'] == True]
+        if len(selected_rows) > 1:
+            st.warning('Select only one record for Edit or Soft Delete.')
+        grid_selected_prj = str(selected_rows.iloc[0]['prj_id']) if len(selected_rows) == 1 else ''
+    else:
+        st.dataframe(grid_df, use_container_width=True, hide_index=True)
+        grid_selected_prj = ''
     x1,x2,x3,x4=st.columns(4)
     if x1.button('Add New Attribute',use_container_width=True):
         st.session_state['open_create_attribute_modal'] = True
@@ -151,7 +163,7 @@ with tab1:
         if rr: st.session_state['latest_excel']=rr.content
     if st.session_state['latest_excel']:
         x2.download_button('Download Latest Data',st.session_state['latest_excel'],'data_dictionary_latest.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',use_container_width=True)
-    selected=x3.selectbox('Selected PRJ ID',['']+[str(x.get('prj_id','')) for x in rows])
+    selected = grid_selected_prj or x3.selectbox('Selected PRJ ID (dropdown fallback)',['']+[str(x.get('prj_id','')) for x in rows])
     if x4.button('Open / Edit Selected Attribute',disabled=not selected,use_container_width=True):
         rr=api('GET',f'/data-dictionary/attributes/{selected}')
         if rr: st.session_state['selected_attribute']=rr.json(); st.session_state['edit_unlocked']=False; edit_modal.open()
