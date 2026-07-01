@@ -52,6 +52,21 @@ def json_get(path,fallback):
 
 def flag(value): return str(value or '').strip().upper() in {'Y','YES','1','TRUE'}
 
+def keep_one_active_attribute_selection():
+    """Retain only the most recently selected grid checkbox."""
+    state = st.session_state.get('active_attribute_grid')
+    if not isinstance(state, dict):
+        return
+    edited = state.get('edited_rows', {})
+    selected = [idx for idx, values in edited.items() if values.get('Select') is True]
+    if len(selected) <= 1:
+        return
+    keep = selected[-1]
+    for idx in selected:
+        if idx != keep:
+            edited.setdefault(idx, {})['Select'] = False
+
+
 def payload_for_attribute(existing=None):
     """Render attribute inputs without st.form to avoid modal submit lifecycle errors."""
     existing = existing or {}
@@ -146,15 +161,18 @@ with tab1:
         selection_df.insert(0, 'Select', False)
         edited_grid = st.data_editor(
             selection_df, use_container_width=True, hide_index=True, key='active_attribute_grid',
-            column_config={'Select': st.column_config.CheckboxColumn('Select', help='Select exactly one row to edit or soft delete.', default=False)},
-            disabled=[column for column in selection_df.columns if column != 'Select']
+            column_config={'Select': st.column_config.CheckboxColumn('Select', help='Only one row can be selected at a time.', default=False)},
+            disabled=[column for column in selection_df.columns if column != 'Select'],
+            on_change=keep_one_active_attribute_selection
         )
         selected_rows = edited_grid.loc[edited_grid['Select'] == True, 'prj_id'].astype(str).tolist()
+        if len(selected_rows) > 1:
+            # Defensive fallback for Streamlit versions that apply callback state on the next rerun.
+            selected_rows = selected_rows[-1:]
+            st.info('Only one record can be selected. The most recently selected row is active.')
     else:
         st.info('No active records found for the selected filters.')
         selected_rows = []
-    if len(selected_rows) > 1:
-        st.error('Select exactly one active attribute at a time. Clear the additional row selections before Edit or Soft Delete.')
     selected = selected_rows[0] if len(selected_rows) == 1 else ''
     active_ids=[str(x.get('prj_id')) for x in rows if x.get('prj_id')]
     # Dropdown remains available as an accessibility fallback; the grid selection takes precedence.
@@ -209,7 +227,7 @@ with tab1:
         deleted=[x for x in (deleted_response.json() if deleted_response else []) if not x.get('is_active')]
         st.dataframe(pd.DataFrame(deleted),use_container_width=True,hide_index=True)
         deleted_ids=[str(x.get('prj_id')) for x in deleted if x.get('prj_id')]
-        deleted_id=st.selectbox('Select one deleted PRJ ID to reactivate',['']+deleted_ids,key='deleted_attribute_selector')
+        deleted_id=st.selectbox('Select Deleted Record to Make Active',['']+deleted_ids,key='deleted_attribute_selector')
         if st.button('Reactivate Selected Attribute',disabled=not deleted_id):
             if api('POST',f'/data-dictionary/attributes/{deleted_id}/reactivate?user={st.session_state.current_user}'):
                 st.success('Attribute reactivated.'); st.rerun()
