@@ -101,7 +101,7 @@ class ExcelService:
 
         mapping = {
             'prj_id': first(lambda c,i: i in {'prjid','cfvid'} or i.startswith('prjid') or i.startswith('projectid')),
-            'attribute_name': first(lambda c,i: i.startswith('attributename'), lambda c,i: 'attribute' in i and 'name' in i, lambda c,i: i.startswith('prjattribute')),
+            'attribute_name': first(lambda c,i: i.startswith('attributename'), lambda c,i: 'attributename' in i, lambda c,i: ('attribute' in i and 'name' in i), lambda c,i: i.startswith('prjattribute')),
             'display_order': first(lambda c,i: i.startswith('displayorder')),
             'section': first(lambda c,i: i.startswith('section')),
             'sub_section': first(lambda c,i: i.startswith('subsection')),
@@ -113,6 +113,14 @@ class ExcelService:
         }
         if not mapping['prj_id']:
             raise ValueError('Prompt worksheet is missing required PRJID/PRJ ID/CFVID column. Detected headers: ' + ', '.join(map(str, df.columns)))
+        # Explicit business-header fallback. This covers spaces/punctuation variants such as
+        # "Attribute Name( to be Viewed on Historical and HITL)".
+        if not mapping['attribute_name']:
+            for column, ident in indexed:
+                printable = re.sub(r'[^a-z0-9]+', ' ', str(column).lower()).strip()
+                if printable.startswith('attribute name') or 'attribute name' in printable:
+                    mapping['attribute_name'] = column
+                    break
 
         # Do not block the full preview only because a workbook uses an unexpected
         # attribute heading. Return an empty attribute_name with a mapping warning.
