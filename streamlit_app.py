@@ -59,6 +59,44 @@ def json_get(path,fallback):
 
 def flag(value): return str(value or '').strip().upper() in {'Y','YES','1','TRUE'}
 
+def render_row_radio_grid(rows, *, key: str, title: str, id_field: str, label_builder):
+    """Render one native Streamlit radio control per displayed record, aligned beside the grid.
+
+    A single st.radio group is deliberately used so selecting a record automatically
+    clears the previous selection. The radio items are positioned in a dedicated
+    Select column next to the corresponding tabular rows.
+    """
+    if not rows:
+        st.info('No records found.')
+        return ''
+    options = [str(row.get(id_field, '')) for row in rows if row.get(id_field) not in (None, '')]
+    if not options:
+        st.info('No selectable records found.')
+        return ''
+    labels = {str(row.get(id_field)): label_builder(row) for row in rows if row.get(id_field) not in (None, '')}
+    left, right = st.columns([0.75, 12], gap='small')
+    with left:
+        st.markdown('**Select**')
+        # Native radio options are rendered vertically: exactly one clickable radio per row.
+        selected = st.radio(
+            title,
+            options,
+            key=key,
+            label_visibility='collapsed',
+            format_func=lambda option: ' ',
+        )
+    with right:
+        table_rows = []
+        for row in rows:
+            copied = dict(row)
+            copied.pop('Select', None)
+            table_rows.append(copied)
+        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True, height=min(38 * (len(table_rows) + 1) + 8, 500))
+    selected_label = labels.get(selected, selected)
+    st.caption(f'Selected: {selected_label}')
+    return selected
+
+
 def keep_one_active_attribute_selection():
     """Retain only the most recently selected grid checkbox."""
     state = st.session_state.get('active_attribute_grid')
@@ -164,14 +202,12 @@ with tab1:
     st.session_state['rows']=rows
     grid_df = pd.DataFrame(rows)
     if not grid_df.empty:
-        st.dataframe(grid_df, use_container_width=True, hide_index=True)
-        active_options = [str(x.get('prj_id')) for x in rows if x.get('prj_id')]
-        selected = st.radio(
-            'Select one Attribute record',
-            [''] + active_options,
-            format_func=lambda value: 'Select an attribute' if value == '' else value,
+        selected = render_row_radio_grid(
+            rows,
             key='active_attribute_selector_radio',
-            horizontal=True,
+            title='Select Attribute row',
+            id_field='prj_id',
+            label_builder=lambda row: f"{row.get('prj_id')} | {row.get('prj_attribute_name') or row.get('attribute_name') or ''}",
         )
     else:
         st.info('No active records found for the selected filters.')
@@ -223,15 +259,13 @@ with tab1:
     with st.expander('View Deleted Attributes and Reactivate'):
         deleted_response=api('POST','/data-dictionary/filter',json={'portfolios':[],'include_deleted':True})
         deleted=[x for x in (deleted_response.json() if deleted_response else []) if not x.get('is_active')]
-        st.dataframe(pd.DataFrame(deleted),use_container_width=True,hide_index=True)
-        deleted_ids=[str(x.get('prj_id')) for x in deleted if x.get('prj_id')]
-        deleted_id=st.radio(
-            'Select one deleted Attribute record to make active',
-            [''] + deleted_ids,
-            format_func=lambda value: 'Select a deleted attribute' if value == '' else value,
+        deleted_id = render_row_radio_grid(
+            deleted,
             key='deleted_attribute_selector_radio',
-            horizontal=True,
-        )
+            title='Select deleted Attribute row to make active',
+            id_field='prj_id',
+            label_builder=lambda row: f"{row.get('prj_id')} | {row.get('prj_attribute_name') or row.get('attribute_name') or ''}",
+        ) if deleted else ''
         if st.button('Reactivate Selected Attribute',disabled=not deleted_id):
             if api('POST',f'/data-dictionary/attributes/{deleted_id}/reactivate?user={st.session_state.current_user}'):
                 st.success('Attribute reactivated.'); st.rerun()
@@ -308,15 +342,16 @@ with tab2:
         st.subheader('Edit / Insert Prompts')
         prompts=json_get('/prompts',[])
         st.caption('Active Prompt Records')
-        if prompts:
-            st.dataframe(pd.DataFrame(prompts),use_container_width=True,hide_index=True)
-        prompt_ids=['']+[str(p.get('prompt_id')) for p in prompts]
-        selected_prompt_id=st.radio(
-            'Select one Prompt record to edit',
-            prompt_ids,
-            format_func=lambda pid: 'Create new prompt' if pid == '' else next((f"Prompt {p.get('prompt_id')} | {p.get('prj_id')} | {p.get('attribute_name') or ''}" for p in prompts if str(p.get('prompt_id')) == pid), pid),
+        selected_prompt_id = render_row_radio_grid(
+            prompts,
             key='prompt_record_option',
-        )
+            title='Select Prompt row to edit',
+            id_field='prompt_id',
+            label_builder=lambda row: f"Prompt {row.get('prompt_id')} | {row.get('prj_id')} | {row.get('attribute_name') or ''}",
+        ) if prompts else ''
+        if st.button('Create New Prompt', key='create_new_prompt_button'):
+            selected_prompt_id = ''
+            st.session_state['prompt_record_option'] = None
         current=next((p for p in prompts if str(p.get('prompt_id')) == selected_prompt_id), None)
         with st.form('prompt_manual_form'):
             ids=[str(x.get('prj_id')) for x in rows if x.get('prj_id')] or ['']
