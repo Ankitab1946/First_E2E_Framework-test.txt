@@ -36,34 +36,36 @@ st.set_page_config(
 # Simple light UI styling. Functional controls and API flows are unchanged.
 st.markdown("""
 <style>
-:root { --dd-primary:#2F5597; --dd-primary-dark:#203864; --dd-border:#B7C9DD; --dd-bg:#F7FAFC; --dd-text:#1F2937; --dd-muted:#52606D; }
+:root { --dd-primary:#294D7A; --dd-primary-dark:#18385E; --dd-primary-light:#EAF2FB; --dd-border:#AFC2D8; --dd-bg:#F7FAFC; --dd-surface:#FFFFFF; --dd-text:#172033; --dd-muted:#506174; --dd-button:#244A78; --dd-button-hover:#18385E; }
 .stApp { background:var(--dd-bg); color:var(--dd-text); }
-[data-testid="stHeader"] { background:#FFFFFF; border-bottom:1px solid #D9E2EC; }
-.block-container { padding-top:1rem; padding-bottom:2rem; max-width:1600px; }
-.dd-hero { background:#EAF2FB; border:1px solid #B7C9DD; border-radius:8px; color:#203864; padding:1rem 1.15rem; margin:0 0 1rem 0; }
-.dd-hero h1 { font-size:1.45rem; margin:0; font-weight:700; color:#203864; }
-.dd-hero p { margin:.25rem 0 0; font-size:.9rem; color:#52606D; }
-.dd-section-label { font-size:.76rem; text-transform:uppercase; letter-spacing:.07em; color:#2F5597; font-weight:700; margin-bottom:.3rem; }
-.dd-grid-title { color:#203864; font-size:1.05rem; font-weight:700; margin:.15rem 0 .55rem; }
-[data-testid="stSidebar"] { background:#F4F7FB; border-right:1px solid #CBD5E1; }
-[data-testid="stSidebar"] * { color:#1F2937; }
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color:#52606D !important; }
-[data-testid="stSidebar"] [data-baseweb="select"] > div, [data-testid="stSidebar"] input { background:#FFFFFF !important; color:#1F2937 !important; border-color:#B7C9DD !important; }
-.stTabs [data-baseweb="tab-list"] { gap:.25rem; border-bottom:1px solid #C9D6E4; }
-.stTabs [data-baseweb="tab"] { height:40px; padding:0 .95rem; color:#52606D; font-weight:650; }
-.stTabs [aria-selected="true"] { color:#203864 !important; border-bottom:3px solid #2F5597 !important; }
-.stButton > button, .stDownloadButton > button { border-radius:6px; min-height:2.35rem; font-weight:650; border-color:#9FB6CF; color:#203864; background:#FFFFFF; }
-.stButton > button[kind="primary"] { background:#2F5597; border-color:#2F5597; color:#FFFFFF; }
-.stButton > button:hover, .stDownloadButton > button:hover { border-color:#2F5597 !important; background:#EEF5FC !important; }
-[data-testid="stExpander"] { background:#FFFFFF; border:1px solid #C9D6E4; border-radius:6px; }
-[data-testid="stDataFrame"] { border:1px solid #9FB6CF; border-radius:4px; overflow:hidden; background:#FFFFFF; }
-[data-testid="stDataFrame"] [role="columnheader"] { background:#2F5597 !important; color:#FFFFFF !important; font-weight:700 !important; }
-[data-testid="stDataFrame"] [role="gridcell"] { color:#1F2937 !important; background:#FFFFFF !important; border-bottom:1px solid #E5EDF5 !important; }
-.dd-grid-header { background:#2F5597; padding:.48rem .5rem; border:1px solid #24457B; }
-.dd-grid-header p { color:#FFFFFF !important; font-weight:700; font-size:.78rem; margin:0; }
-.dd-grid-row { background:#FFFFFF; padding:.35rem .45rem; border:1px solid #D6E0EB; min-height:34px; }
-.dd-grid-row p { color:#1F2937 !important; font-size:.82rem; margin:0; overflow-wrap:anywhere; }
-[data-testid="stVerticalBlockBorderWrapper"] { border-color:#D6E0EB !important; border-radius:4px !important; background:#FFFFFF; }
+[data-testid="stHeader"] { background:#FFFFFF; border-bottom:1px solid #D7E2EF; }
+.block-container { padding-top:1rem; padding-bottom:2rem; max-width:1650px; }
+.dd-hero { background:var(--dd-primary-light); border:1px solid var(--dd-border); border-radius:7px; color:var(--dd-primary-dark); padding:1rem 1.2rem; margin:0 0 1rem 0; }
+.dd-hero h1 { font-size:1.45rem; margin:0; font-weight:750; color:var(--dd-primary-dark); }
+.dd-hero p { margin:.25rem 0 0; font-size:.9rem; color:var(--dd-muted); }
+.dd-section-label { font-size:.76rem; text-transform:uppercase; letter-spacing:.07em; color:var(--dd-primary); font-weight:750; margin-bottom:.3rem; }
+.dd-grid-title { color:var(--dd-primary-dark); font-size:1.05rem; font-weight:750; margin:.15rem 0 .55rem; }
+[data-testid="stSidebar"] { background:var(--dd-primary-light); border-right:1px solid var(--dd-border); }
+[data-testid="stSidebar"] * { color:var(--dd-text); }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color:var(--dd-muted) !important; }
+[data-testid="stSidebar"] [data-baseweb="select"] > div, [data-testid="stSidebar"] input { background:#FFFFFF !important; color:var(--dd-text) !important; border-color:var(--dd-border) !important; }
+.stTabs [data-baseweb="tab-list"] { gap:.35rem; border-bottom:1px solid var(--dd-border); background:#F1F6FB; border-radius:6px 6px 0 0; padding:.2rem .25rem 0; }
+.stTabs [data-baseweb="tab"] { height:40px; padding:0 1rem; color:var(--dd-muted); font-weight:700; border-radius:5px 5px 0 0; }
+.stTabs [data-baseweb="tab"]:hover { background:#E1ECF7; color:var(--dd-primary-dark); }
+.stTabs [aria-selected="true"] { background:#FFFFFF !important; color:var(--dd-primary-dark) !important; border:1px solid var(--dd-border) !important; border-bottom:3px solid var(--dd-primary) !important; }
+.stButton > button, .stDownloadButton > button { border-radius:5px; min-height:2.35rem; font-weight:700; border-color:var(--dd-button); color:#FFFFFF; background:var(--dd-button); }
+.stButton > button[kind="primary"] { background:var(--dd-primary-dark); border-color:var(--dd-primary-dark); color:#FFFFFF; }
+.stButton > button:hover, .stDownloadButton > button:hover { border-color:var(--dd-button-hover) !important; background:var(--dd-button-hover) !important; color:#FFFFFF !important; }
+[data-testid="stExpander"] { background:#FFFFFF; border:1px solid var(--dd-border); border-radius:6px; }
+[data-testid="stDataFrame"] { border:1px solid var(--dd-border); border-radius:5px; overflow:hidden; background:#FFFFFF; }
+[data-testid="stDataFrame"] [role="columnheader"] { background:var(--dd-primary-dark) !important; color:#FFFFFF !important; font-weight:750 !important; }
+[data-testid="stDataFrame"] [role="gridcell"] { color:var(--dd-text) !important; background:#FFFFFF !important; border-bottom:1px solid #E5EDF5 !important; }
+.dd-grid-header { background:var(--dd-primary-dark); padding:.5rem .55rem; border:1px solid #102B49; min-height:38px; }
+.dd-grid-header p { color:#FFFFFF !important; font-weight:750; font-size:.77rem; margin:0; }
+.dd-grid-row { background:#FFFFFF; padding:.42rem .5rem; border:1px solid #D6E1EC; min-height:36px; }
+.dd-grid-row p { color:var(--dd-text) !important; font-size:.82rem; margin:0; overflow-wrap:anywhere; }
+.dd-grid-searchbar { background:#FFFFFF; border:1px solid var(--dd-border); border-radius:6px; padding:.5rem .65rem .25rem; margin:.15rem 0 .55rem; }
+[data-testid="stVerticalBlockBorderWrapper"] { border-color:#D6E0EB !important; border-radius:5px !important; background:#FFFFFF; }
 .stAlert, [data-testid="stToast"] { border-radius:6px !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -143,94 +145,81 @@ def json_get(path,fallback):
 def flag(value): return str(value or '').strip().upper() in {'Y','YES','1','TRUE'}
 
 def render_row_radio_grid(rows, *, key: str, title: str, id_field: str, label_builder):
-    """Render a table-aligned single-select control.
-
-    Streamlit cannot place an interactive native ``st.radio`` inside a
-    ``st.dataframe`` cell. This renderer therefore builds the table row-by-row:
-    the first column contains a radio-styled native control and every following
-    cell is rendered in the same row. State callbacks make the controls mutually
-    exclusive, so only one record can be selected at a time.
-    """
+    """Visible, searchable, sortable audit-style grid with one radio-style selector per row."""
     if not rows:
         st.info('No records found.')
         return ''
-
     selectable = [row for row in rows if row.get(id_field) not in (None, '')]
     if not selectable:
         st.info('No selectable records found.')
         return ''
 
-    # Keep the grid compact and readable while preserving the important columns.
     if id_field == 'prompt_id':
         preferred = ['prompt_id', 'prj_id', 'attribute_name', 'section', 'sub_section', 'display_order']
     else:
-        preferred = [
-            'prj_id', 'prj_attribute_name', 'prj_attribute_description',
-            'source', 'where_in_financial_statement', 'editable', 'percent_ratio',
-            'required_by_fi_banks', 'required_by_corporates',
-            'required_by_fi_insurance', 'required_by_zeus_downstream'
-        ]
+        preferred = ['prj_id','prj_attribute_name','prj_attribute_description','source','where_in_financial_statement','editable','percent_ratio','required_by_fi_banks','required_by_corporates','required_by_fi_insurance','required_by_zeus_downstream']
     display_columns = [col for col in preferred if any(col in row for row in selectable)]
     if not display_columns:
-        display_columns = [col for col in selectable[0].keys() if col != 'Select'][:5]
+        display_columns = [col for col in selectable[0].keys() if col != 'Select'][:7]
+    labels = {
+        'required_by_fi_banks':'Required FI Banks', 'required_by_corporates':'Required Corporates',
+        'required_by_fi_insurance':'Required FI Insurance', 'required_by_zeus_downstream':'Required Zeus Downstream',
+        'where_in_financial_statement':'Section', 'prj_attribute_name':'Attribute Name',
+        'prj_attribute_description':'Attribute Description', 'percent_ratio':'Percent / Ratio',
+        'attribute_name':'Attribute Name', 'prompt_id':'Prompt ID', 'prj_id':'PRJ ID'
+    }
 
-    # Render a small scoped CSS rule for each row selector, making the checkbox
-    # visually circular while retaining native Streamlit click behaviour.
-    css_rules = []
-    state_keys = []
-    for index, _row in enumerate(selectable):
-        state_key = f'{key}__row_{index}'
-        state_keys.append(state_key)
-        css_rules.append(
-            f".st-key-{state_key} [data-testid=\"stCheckbox\"] label > div:first-child "
-            "{border-radius:50% !important;}"
-        )
-    st.markdown('<style>' + ''.join(css_rules) + '</style>', unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown(f'<div class="dd-grid-title">{title}</div>', unsafe_allow_html=True)
+        search_col, sort_col, direction_col = st.columns([2.4, 1.4, 1.1])
+        search_text = search_col.text_input('Search grid', key=f'{key}__search', placeholder='Search any displayed value').strip().lower()
+        sort_by = sort_col.selectbox('Sort column', display_columns, key=f'{key}__sort', format_func=lambda c: labels.get(c, c.replace('_',' ').title()))
+        descending = direction_col.toggle('Descending', key=f'{key}__desc')
+        filtered = selectable
+        if search_text:
+            filtered = [r for r in selectable if search_text in ' '.join(str(r.get(c,'') or '') for c in display_columns).lower()]
+        filtered = sorted(filtered, key=lambda r: str(r.get(sort_by,'') or '').lower(), reverse=descending)
+        if not filtered:
+            st.info('No records match the current search.')
+            return ''
 
-    selected_state_key = f'{key}__selected'
+        selected_state_key = f'{key}__selected_id'
+        active_ids = {str(r.get(id_field)) for r in selectable}
+        if st.session_state.get(selected_state_key) not in active_ids:
+            st.session_state[selected_state_key] = ''
+        row_keys = [f'{key}__pick_{str(r.get(id_field))}_{idx}' for idx,r in enumerate(filtered)]
 
-    def choose_row(changed_key: str):
-        if st.session_state.get(changed_key):
-            for other_key in state_keys:
-                if other_key != changed_key:
-                    st.session_state[other_key] = False
-            st.session_state[selected_state_key] = changed_key
-        elif st.session_state.get(selected_state_key) == changed_key:
-            st.session_state[selected_state_key] = None
+        def pick(changed_key, record_id):
+            if st.session_state.get(changed_key):
+                for rk in row_keys:
+                    if rk != changed_key:
+                        st.session_state[rk] = False
+                st.session_state[selected_state_key] = record_id
+            elif st.session_state.get(selected_state_key) == record_id:
+                st.session_state[selected_state_key] = ''
 
-    # Header row in a visible grid treatment.
-    widths = [0.65] + [1.75 if col in {'prj_attribute_description', 'attribute_name'} else 1.15 for col in display_columns]
-    header = st.columns(widths, gap='small')
-    header[0].markdown('<div class="dd-grid-header"><p>Select</p></div>', unsafe_allow_html=True)
-    for col, cell in zip(display_columns, header[1:]):
-        cell.markdown(f'<div class="dd-grid-header"><p>{ {'required_by_fi_banks':'Required FI Banks', 'required_by_corporates':'Required Corporates', 'required_by_fi_insurance':'Required FI Insurance', 'required_by_zeus_downstream':'Required Zeus Downstream', 'where_in_financial_statement':'Section', 'prj_attribute_name':'Attribute Name', 'prj_attribute_description':'Attribute Description', 'percent_ratio':'Percent / Ratio'}.get(col, col.replace("_", " ").title())}</p></div>', unsafe_allow_html=True)
+        # Checkbox is deliberately styled as a radio control. It lives in the Select cell for each row.
+        st.markdown('<style>' + ''.join([f'.st-key-{rk} [data-testid="stCheckbox"] label > div:first-child{{border-radius:50% !important;}}' for rk in row_keys]) + '</style>', unsafe_allow_html=True)
+        widths = [0.62] + [1.7 if c in {'prj_attribute_description','attribute_name'} else 1.12 for c in display_columns]
+        header = st.columns(widths, gap='small')
+        header[0].markdown('<div class="dd-grid-header"><p>Select</p></div>', unsafe_allow_html=True)
+        for col, cell in zip(display_columns, header[1:]):
+            cell.markdown(f'<div class="dd-grid-header"><p>{labels.get(col, col.replace("_", " ").title())}</p></div>', unsafe_allow_html=True)
 
-    selected_value = ''
-    for index, row in enumerate(selectable):
-        state_key = state_keys[index]
-        if state_key not in st.session_state:
-            st.session_state[state_key] = False
-        with st.container(border=True):
+        for index, row in enumerate(filtered):
+            record_id = str(row.get(id_field))
+            state_key = row_keys[index]
+            if state_key not in st.session_state:
+                st.session_state[state_key] = st.session_state.get(selected_state_key) == record_id
             row_cells = st.columns(widths, gap='small')
             with row_cells[0]:
-                st.checkbox(
-                    '',
-                    key=state_key,
-                    label_visibility='collapsed',
-                    on_change=choose_row,
-                    args=(state_key,),
-                )
+                st.checkbox('', key=state_key, label_visibility='collapsed', on_change=pick, args=(state_key, record_id))
             for col, cell in zip(display_columns, row_cells[1:]):
                 value = row.get(col, '')
-                if value is None:
-                    value = ''
-                cell.markdown(f'<div class="dd-grid-row"><p>{str(value)}</p></div>', unsafe_allow_html=True)
-        if st.session_state.get(state_key):
-            selected_value = str(row.get(id_field, ''))
+                cell.markdown(f'<div class="dd-grid-row"><p>{"" if value is None else str(value)}</p></div>', unsafe_allow_html=True)
 
-    st.caption('Select exactly one record. Selecting another row automatically clears the earlier selection.')
-    return selected_value
-
+        st.caption('Search and sort are applied to this grid. Select exactly one record for available actions.')
+        return st.session_state.get(selected_state_key, '')
 
 def keep_one_active_attribute_selection():
     """Retain only the most recently selected grid checkbox."""
@@ -550,4 +539,15 @@ with tab3:
     st.markdown('<div class="dd-section-label">Audit History</div>', unsafe_allow_html=True)
     st.markdown('<div class="dd-grid-title">Traceable change history</div>', unsafe_allow_html=True)
     audit=api('GET','/audit')
-    if audit: st.dataframe(pd.DataFrame(audit.json()),use_container_width=True,hide_index=True)
+    if audit:
+        audit_rows=audit.json()
+        audit_df=pd.DataFrame(audit_rows)
+        if not audit_df.empty:
+            search_audit=st.text_input('Search Audit History', key='audit_history_search', placeholder='Search any audit value')
+            if search_audit:
+                needle=search_audit.lower()
+                audit_df=audit_df[audit_df.astype(str).apply(lambda col: col.str.lower().str.contains(needle, na=False)).any(axis=1)]
+            st.caption('Click a column header to sort. Use Search Audit History to filter rows.')
+            st.dataframe(audit_df,use_container_width=True,hide_index=True)
+        else:
+            st.info('No audit history found.')
