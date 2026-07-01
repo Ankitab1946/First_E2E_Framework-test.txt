@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from DataDictionaryAdminApp.core.database import get_db
 from DataDictionaryAdminApp.api.schemas_api import PromptUpsert
@@ -13,7 +13,7 @@ def serial(row): return {c.name:getattr(row,c.name) for c in row.__table__.colum
 @router.get('')
 def list_prompts(prj_id:str|None=None, include_deleted:bool=False, db:Session=Depends(get_db)):
     stmt=select(ScanningPromptReference)
-    if not include_deleted: stmt=stmt.where(ScanningPromptReference.is_active == True)
+    if not include_deleted: stmt=stmt.where(ScanningPromptReference.is_active == 1)
     if prj_id: stmt=stmt.where(ScanningPromptReference.prj_id.ilike(f'%{prj_id}%'))
     return [serial(x) for x in db.scalars(stmt.order_by(ScanningPromptReference.prompt_id)).all()]
 
