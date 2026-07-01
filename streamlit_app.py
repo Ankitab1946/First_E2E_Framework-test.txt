@@ -40,9 +40,16 @@ def api(method,path,quiet=False,**kwargs):
         return None
     if not response.ok:
         if not quiet:
-            try: detail=response.json().get('detail',response.text)
-            except Exception: detail=response.text
-            st.error(f'API error ({response.status_code}): {detail}')
+            try:
+                payload = response.json()
+                detail = payload.get('detail', payload)
+                if isinstance(detail, (dict, list)):
+                    st.error(f'API error ({response.status_code}). Detailed failure response:')
+                    st.json(detail)
+                else:
+                    st.error(f'API error ({response.status_code}): {detail}')
+            except Exception:
+                st.error(f'API error ({response.status_code}): {response.text}')
         return None
     return response
 
@@ -157,28 +164,19 @@ with tab1:
     st.session_state['rows']=rows
     grid_df = pd.DataFrame(rows)
     if not grid_df.empty:
-        selection_df = grid_df.copy()
-        selection_df.insert(0, 'Select', False)
-        edited_grid = st.data_editor(
-            selection_df, use_container_width=True, hide_index=True, key='active_attribute_grid',
-            column_config={'Select': st.column_config.CheckboxColumn('Select', help='Only one row can be selected at a time.', default=False)},
-            disabled=[column for column in selection_df.columns if column != 'Select'],
-            on_change=keep_one_active_attribute_selection
+        st.dataframe(grid_df, use_container_width=True, hide_index=True)
+        active_options = [str(x.get('prj_id')) for x in rows if x.get('prj_id')]
+        selected = st.radio(
+            'Select one Attribute record',
+            [''] + active_options,
+            format_func=lambda value: 'Select an attribute' if value == '' else value,
+            key='active_attribute_selector_radio',
+            horizontal=True,
         )
-        selected_rows = edited_grid.loc[edited_grid['Select'] == True, 'prj_id'].astype(str).tolist()
-        if len(selected_rows) > 1:
-            # Defensive fallback for Streamlit versions that apply callback state on the next rerun.
-            selected_rows = selected_rows[-1:]
-            st.info('Only one record can be selected. The most recently selected row is active.')
     else:
         st.info('No active records found for the selected filters.')
-        selected_rows = []
-    selected = selected_rows[0] if len(selected_rows) == 1 else ''
-    active_ids=[str(x.get('prj_id')) for x in rows if x.get('prj_id')]
-    # Dropdown remains available as an accessibility fallback; the grid selection takes precedence.
-    fallback_selected = st.selectbox('Or select one active attribute', [''] + active_ids, key='active_attribute_selector')
-    if not selected and fallback_selected:
-        selected = fallback_selected
+        selected = ''
+    st.caption('Only one active attribute can be selected at a time for Edit or Soft Delete.')
     x1,x2,x3,x4=st.columns(4)
     if x1.button('Add New Attribute',use_container_width=True):
         st.session_state['open_create_attribute_modal'] = True
@@ -227,7 +225,13 @@ with tab1:
         deleted=[x for x in (deleted_response.json() if deleted_response else []) if not x.get('is_active')]
         st.dataframe(pd.DataFrame(deleted),use_container_width=True,hide_index=True)
         deleted_ids=[str(x.get('prj_id')) for x in deleted if x.get('prj_id')]
-        deleted_id=st.selectbox('Select Deleted Record to Make Active',['']+deleted_ids,key='deleted_attribute_selector')
+        deleted_id=st.radio(
+            'Select one deleted Attribute record to make active',
+            [''] + deleted_ids,
+            format_func=lambda value: 'Select a deleted attribute' if value == '' else value,
+            key='deleted_attribute_selector_radio',
+            horizontal=True,
+        )
         if st.button('Reactivate Selected Attribute',disabled=not deleted_id):
             if api('POST',f'/data-dictionary/attributes/{deleted_id}/reactivate?user={st.session_state.current_user}'):
                 st.success('Attribute reactivated.'); st.rerun()
@@ -304,15 +308,21 @@ with tab2:
         st.subheader('Edit / Insert Prompts')
         prompts=json_get('/prompts',[])
         st.caption('Active Prompt Records')
-        st.dataframe(pd.DataFrame(prompts),use_container_width=True,hide_index=True)
-        choices=['Create new prompt']+[f"{p.get('prompt_id')} | {p.get('prj_id')} | {p.get('attribute_name') or ''}" for p in prompts]
-        choice=st.selectbox('Prompt record',choices)
-        current=None if choice=='Create new prompt' else prompts[choices.index(choice)-1]
+        if prompts:
+            st.dataframe(pd.DataFrame(prompts),use_container_width=True,hide_index=True)
+        prompt_ids=['']+[str(p.get('prompt_id')) for p in prompts]
+        selected_prompt_id=st.radio(
+            'Select one Prompt record to edit',
+            prompt_ids,
+            format_func=lambda pid: 'Create new prompt' if pid == '' else next((f"Prompt {p.get('prompt_id')} | {p.get('prj_id')} | {p.get('attribute_name') or ''}" for p in prompts if str(p.get('prompt_id')) == pid), pid),
+            key='prompt_record_option',
+        )
+        current=next((p for p in prompts if str(p.get('prompt_id')) == selected_prompt_id), None)
         with st.form('prompt_manual_form'):
             ids=[str(x.get('prj_id')) for x in rows if x.get('prj_id')] or ['']
             pid=st.selectbox('PRJ ID *',ids,index=ids.index(str(current.get('prj_id'))) if current and str(current.get('prj_id')) in ids else 0,disabled=bool(current))
             derived=json_get(f'/data-dictionary/attributes/{pid}',{}) if pid else {}
-            st.caption(f"Scope and Portfolio are derived from the active scope for PRJ ID {pid or '-'}.")
+            st.caption(f"Scope and Portfolio are derived from the active scope for PRJ ID {pid or '-' }.")
             name=st.text_input('Attribute Name',value=str((current or {}).get('attribute_name') or derived.get('prj_attribute_name') or ''))
             c=st.columns(3); sec=c[0].selectbox('Section',sections,index=sections.index((current or {}).get('section')) if (current or {}).get('section') in sections else 0); sub=c[1].text_input('Sub-Section',value=str((current or {}).get('sub_section') or '')); dtype=c[2].text_input('Data Type',value=str((current or {}).get('data_type') or ''))
             calc=st.text_area('Calculation Logic',value=str((current or {}).get('calculation_logic') or ''))
