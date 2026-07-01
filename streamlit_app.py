@@ -1,6 +1,7 @@
 """Streamlit UI for the Data Dictionary Admin App. UI calls FastAPI only."""
 from __future__ import annotations
 import os
+import json
 from pathlib import Path
 import pandas as pd
 import requests
@@ -22,19 +23,90 @@ API_BASE=os.getenv('API_BASE_URL','http://localhost:8503/api/v1').rstrip('/')
 API=API_BASE if API_BASE.endswith('/api/v1') else API_BASE+'/api/v1'
 SECTIONS=['Income Statement','Balance Sheet','Cash Flow','Ratios','Derivatives','Miscellaneous','Other']
 PORTFOLIOS=['FI Banks','Corporates','FI Insurance','Zeus Downstream','ALL']
-st.set_page_config(page_title='Data Dictionary Admin App',layout='wide')
-st.title(os.getenv('APP_NAME','Data Dictionary Streamlit Admin'))
-st.caption('Build: modal-parser-fix-verified')
+HTTP = requests.Session()
+HTTP.headers.update({'Accept': 'application/json'})
+
+st.set_page_config(
+    page_title='Data Dictionary Admin App',
+    page_icon='📚',
+    layout='wide',
+    initial_sidebar_state='expanded',
+)
+
+# Professional enterprise styling using native Streamlit controls.
+st.markdown("""
+<style>
+:root { --dd-navy:#0B2D52; --dd-blue:#1D4E89; --dd-border:#D9E2EC; --dd-muted:#52606D; }
+.stApp { background:#F6F8FB; }
+[data-testid="stHeader"] { background:rgba(246,248,251,.94); }
+.block-container { padding-top:1.35rem; padding-bottom:2.4rem; max-width:1700px; }
+.dd-hero { background:linear-gradient(135deg,#0B2D52,#1D4E89); border-radius:16px; color:white; padding:1.15rem 1.35rem; margin:0 0 1.15rem 0; box-shadow:0 8px 24px rgba(11,45,82,.16); }
+.dd-hero h1 { font-size:1.55rem; margin:0; font-weight:700; letter-spacing:-.02em; }
+.dd-hero p { margin:.28rem 0 0; font-size:.9rem; opacity:.88; }
+.dd-section-label { font-size:.76rem; text-transform:uppercase; letter-spacing:.09em; color:#1D4E89; font-weight:800; margin-bottom:.35rem; }
+.dd-grid-title { color:#0B2D52; font-size:1.05rem; font-weight:750; margin:.15rem 0 .65rem; }
+[data-testid="stSidebar"] { background:#0B2D52; }
+[data-testid="stSidebar"] * { color:#F8FBFF; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color:#C9D8E8 !important; }
+[data-testid="stSidebar"] .stSelectbox label, [data-testid="stSidebar"] .stTextInput label { color:#E9F2FB !important; }
+[data-testid="stSidebar"] [data-baseweb="select"] > div, [data-testid="stSidebar"] input { background:#F7FAFC !important; color:#102A43 !important; }
+[data-testid="stSidebar"] button { border-color:rgba(255,255,255,.34) !important; }
+.stTabs [data-baseweb="tab-list"] { gap:.45rem; border-bottom:1px solid #D9E2EC; }
+.stTabs [data-baseweb="tab"] { height:42px; padding:0 1.05rem; border-radius:9px 9px 0 0; color:#52606D; font-weight:650; }
+.stTabs [aria-selected="true"] { color:#0B2D52 !important; background:#FFF; border:1px solid #D9E2EC; border-bottom:2px solid white; }
+.stButton > button, .stDownloadButton > button { border-radius:8px; min-height:2.5rem; font-weight:650; border-color:#B8C7D9; }
+.stButton > button[kind="primary"] { background:#1D4E89; border-color:#1D4E89; }
+[data-testid="stExpander"] { background:white; border:1px solid #D9E2EC; border-radius:10px; overflow:hidden; }
+[data-testid="stDataFrame"] { border:1px solid #D9E2EC; border-radius:10px; overflow:hidden; background:white; }
+.dd-grid-header { background:#0B2D52; padding:.5rem .55rem; border-radius:8px 8px 0 0; margin-top:.35rem; }
+.dd-grid-header p { color:white !important; font-weight:750; font-size:.78rem; margin:0; text-transform:uppercase; letter-spacing:.025em; }
+.dd-grid-row { background:white; padding:.12rem .05rem; min-height:31px; }
+.dd-grid-row p { font-size:.82rem; margin:.1rem 0; color:#243B53; overflow-wrap:anywhere; }
+</style>
+""", unsafe_allow_html=True)
+st.markdown(f"""
+<div class="dd-hero">
+  <h1>{os.getenv('APP_NAME','Data Dictionary Streamlit Admin')}</h1>
+  <p>Master Dictionary, prompt lifecycle, audit controls, and governed data operations.</p>
+</div>
+""", unsafe_allow_html=True)
 
 for key,value in {'latest_excel':None,'rows':[],'selected_attribute':None,'prompt_preview':None,'prompt_delta':None,'show_master_upload':False,'active_prompt':None,'app_role':'Admin','open_create_attribute_modal':False,'create_modal_generation':0}.items():
     st.session_state.setdefault(key,value)
+
+@st.cache_data(ttl=30, show_spinner=False)
+def cached_get_json(path: str, env: str, role: str):
+    """Cache read-only API requests to reduce grid refresh churn."""
+    headers = {'X-App-Environment': env, 'X-App-Role': role}
+    try:
+        response = HTTP.get(API + path, headers=headers, timeout=45)
+        if not response.ok:
+            return {'__api_error__': response.text, '__status__': response.status_code}
+        return response.json()
+    except requests.RequestException as exc:
+        return {'__api_error__': str(exc), '__status__': 0}
+
+@st.cache_data(ttl=15, show_spinner=False)
+def cached_filter_json(payload_json: str, env: str, role: str):
+    headers = {'X-App-Environment': env, 'X-App-Role': role}
+    try:
+        response = HTTP.post(API + '/data-dictionary/filter', headers=headers, json=json.loads(payload_json), timeout=60)
+        if not response.ok:
+            return {'__api_error__': response.text, '__status__': response.status_code}
+        return response.json()
+    except requests.RequestException as exc:
+        return {'__api_error__': str(exc), '__status__': 0}
+
+def clear_read_cache():
+    cached_get_json.clear()
+    cached_filter_json.clear()
 
 def api(method,path,quiet=False,**kwargs):
     headers=kwargs.pop('headers',{})
     headers['X-App-Environment']=st.session_state.get('env',os.getenv('SELECTED_ENVIRONMENT','LOCAL'))
     headers['X-App-Role']=st.session_state.get('app_role','Admin')
     try:
-        response=requests.request(method,API+path,headers=headers,timeout=180,**kwargs)
+        response=HTTP.request(method,API+path,headers=headers,timeout=180,**kwargs)
     except requests.RequestException as exc:
         if not quiet: st.error(f'API connection failed: {exc}')
         return None
@@ -51,11 +123,13 @@ def api(method,path,quiet=False,**kwargs):
             except Exception:
                 st.error(f'API error ({response.status_code}): {response.text}')
         return None
+    if method.upper() != 'GET':
+        clear_read_cache()
     return response
 
 def json_get(path,fallback):
-    r=api('GET',path,quiet=True)
-    return r.json() if r else fallback
+    payload = cached_get_json(path, st.session_state.get('env', os.getenv('SELECTED_ENVIRONMENT','LOCAL')), st.session_state.get('app_role','Admin'))
+    return fallback if isinstance(payload, dict) and payload.get('__api_error__') else payload
 
 def flag(value): return str(value or '').strip().upper() in {'Y','YES','1','TRUE'}
 
@@ -110,32 +184,33 @@ def render_row_radio_grid(rows, *, key: str, title: str, id_field: str, label_bu
         elif st.session_state.get(selected_state_key) == changed_key:
             st.session_state[selected_state_key] = None
 
-    # Header row.
-    widths = [0.65] + [1.6 if col in {'prj_attribute_description', 'attribute_name'} else 1.1 for col in display_columns]
+    # Header row in a visible grid treatment.
+    widths = [0.65] + [1.75 if col in {'prj_attribute_description', 'attribute_name'} else 1.15 for col in display_columns]
     header = st.columns(widths, gap='small')
-    header[0].markdown('**Select**')
+    header[0].markdown('<div class="dd-grid-header"><p>Select</p></div>', unsafe_allow_html=True)
     for col, cell in zip(display_columns, header[1:]):
-        cell.markdown(f"**{col.replace('_', ' ').title()}**")
+        cell.markdown(f'<div class="dd-grid-header"><p>{col.replace("_", " ").title()}</p></div>', unsafe_allow_html=True)
 
     selected_value = ''
     for index, row in enumerate(selectable):
         state_key = state_keys[index]
         if state_key not in st.session_state:
             st.session_state[state_key] = False
-        row_cells = st.columns(widths, gap='small')
-        with row_cells[0]:
-            st.checkbox(
-                '',
-                key=state_key,
-                label_visibility='collapsed',
-                on_change=choose_row,
-                args=(state_key,),
-            )
-        for col, cell in zip(display_columns, row_cells[1:]):
-            value = row.get(col, '')
-            if value is None:
-                value = ''
-            cell.write(str(value))
+        with st.container(border=True):
+            row_cells = st.columns(widths, gap='small')
+            with row_cells[0]:
+                st.checkbox(
+                    '',
+                    key=state_key,
+                    label_visibility='collapsed',
+                    on_change=choose_row,
+                    args=(state_key,),
+                )
+            for col, cell in zip(display_columns, row_cells[1:]):
+                value = row.get(col, '')
+                if value is None:
+                    value = ''
+                cell.markdown(f'<div class="dd-grid-row"><p>{str(value)}</p></div>', unsafe_allow_html=True)
         if st.session_state.get(state_key):
             selected_value = str(row.get(id_field, ''))
 
@@ -220,7 +295,10 @@ create_modal=Modal('Create New Attribute',key='create_attribute_modal',max_width
 edit_modal=Modal('Edit Attribute',key='edit_attribute_modal',max_width=1200)
 
 with st.sidebar:
-    st.subheader('Connection')
+    st.markdown('### Workspace')
+    st.caption('Connection, environment, access and user context')
+    st.divider()
+    st.markdown('**Connection**')
     envs=[x.strip().upper() for x in os.getenv('APP_ENVIRONMENTS','LOCAL,DEV,UAT,PROD').split(',') if x.strip()]
     default=os.getenv('SELECTED_ENVIRONMENT','LOCAL').upper()
     st.selectbox('Environment',envs,index=envs.index(default) if default in envs else 0,key='env')
@@ -228,7 +306,7 @@ with st.sidebar:
     status=json_get('/system/connection-status',{'connected':False,'message':'FastAPI endpoint unavailable'})
     st.caption('Server: '+str(env.get('server',os.getenv('SQLSERVER_SERVER','Not configured'))))
     st.caption('Database: '+str(env.get('database',os.getenv('SQLSERVER_DATABASE','Not configured'))))
-    (st.success if status.get('connected') else st.error)('DB Connected' if status.get('connected') else 'DB Not Connected: '+str(status.get('message','Unknown error')))
+    (st.success if status.get('connected') else st.error)('Database connected' if status.get('connected') else 'Database not connected: '+str(status.get('message','Unknown error')))
     st.selectbox('Role', ['Admin','User'], key='app_role', help='Admin can upload/compare the Master Dictionary and export to S3. User can see these controls but cannot execute them.')
     st.text_input('Current User',value=os.getenv('USERNAME',os.getenv('DEFAULT_USER','sysuser')),key='current_user')
     if st.button('Refresh connection'): st.rerun()
@@ -237,14 +315,21 @@ sections=json_get('/lookups/sections',SECTIONS)
 tab1,tab2,tab3=st.tabs(['Data Dictionary','Prompt Management','Audit History'])
 
 with tab1:
-    st.subheader('View Latest Data Dictionary')
-    a,b,c,d=st.columns(4)
-    pf=a.multiselect('Portfolio/Sector',PORTFOLIOS)
-    prj=b.text_input('PRJ ID filter'); name=c.text_input('Attribute Name filter'); section=d.selectbox('Section filter',['']+sections)
-    e,f=st.columns(2); desc=e.text_input('Attribute Description filter'); overlap=f.checkbox('Overlapped Attribute only')
-    # View Latest is intentionally active-only. Deleted records are handled in the separate Reactivate section below.
-    r=api('POST','/data-dictionary/filter',json={'portfolios':[] if 'ALL' in pf else pf,'prj_id':prj or None,'attribute_name':name or None,'attribute_description':desc or None,'section':section or None,'include_deleted':False,'overlapped_only':overlap})
-    rows=r.json() if r else []
+    st.markdown('<div class="dd-section-label">Data Dictionary</div>', unsafe_allow_html=True)
+    st.markdown('<div class="dd-grid-title">Latest Active Attributes</div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        a,b,c,d=st.columns(4)
+        pf=a.multiselect('Portfolio / Sector',PORTFOLIOS, help='Use ALL for all active attributes or select one or more portfolios.')
+        prj=b.text_input('PRJ ID', placeholder='e.g. PRJ_001'); name=c.text_input('Attribute Name', placeholder='Search name'); section=d.selectbox('Section',['']+sections)
+        e,f,g=st.columns([2,1,1]); desc=e.text_input('Attribute Description', placeholder='Search description'); overlap=f.checkbox('Overlapped Attribute', help='Show attributes required by multiple selected portfolios.'); g.button('Refresh Grid', type='primary', use_container_width=True, on_click=clear_read_cache)
+    # View Latest is intentionally active-only. Cached for quick widget reruns.
+    filter_payload={'portfolios':[] if 'ALL' in pf else pf,'prj_id':prj or None,'attribute_name':name or None,'attribute_description':desc or None,'section':section or None,'include_deleted':False,'overlapped_only':overlap}
+    filter_result = cached_filter_json(json.dumps(filter_payload, sort_keys=True, default=str), st.session_state.get('env', os.getenv('SELECTED_ENVIRONMENT','LOCAL')), st.session_state.get('app_role','Admin'))
+    if isinstance(filter_result, dict) and filter_result.get('__api_error__'):
+        st.error(f"Unable to load Data Dictionary ({filter_result.get('__status__')}): {filter_result.get('__api_error__')}")
+        rows=[]
+    else:
+        rows=filter_result or []
     st.session_state['rows']=rows
     grid_df = pd.DataFrame(rows)
     if not grid_df.empty:
@@ -259,7 +344,8 @@ with tab1:
         st.info('No active records found for the selected filters.')
         selected = ''
     st.caption('Only one active attribute can be selected at a time for Edit or Soft Delete.')
-    x1,x2,x3,x4=st.columns(4)
+    st.markdown('<div class="dd-section-label">Actions</div>', unsafe_allow_html=True)
+    x1,x2,x3,x4=st.columns([1.2,1.2,1.2,1.2])
     if x1.button('Add New Attribute',use_container_width=True):
         st.session_state['open_create_attribute_modal'] = True
         st.session_state['create_modal_generation'] += 1
@@ -273,7 +359,7 @@ with tab1:
     if x4.button('Open / Edit Selected Attribute',disabled=not selected,use_container_width=True):
         rr=api('GET',f'/data-dictionary/attributes/{selected}')
         if rr: st.session_state['selected_attribute']=rr.json(); st.session_state['edit_unlocked']=False; edit_modal.open()
-    y1,y2,y3=st.columns(3)
+    y1,y2,y3=st.columns([1.2,1.2,1.2])
     is_admin = st.session_state.get('app_role','Admin') == 'Admin'
     if y1.button('Upload and Compare Master Dictionary',use_container_width=True, disabled=not is_admin): st.session_state['show_master_upload']=not st.session_state['show_master_upload']
     if y2.button('Soft Delete Attribute',disabled=not selected,use_container_width=True):
@@ -368,7 +454,9 @@ if edit_modal.is_open():
             edit_modal.close(); st.session_state['edit_unlocked']=False; st.rerun()
 
 with tab2:
-    bulk,manual=st.tabs(['Bulk Upload','Edit/Insert Prompts'])
+    st.markdown('<div class="dd-section-label">Prompt Management</div>', unsafe_allow_html=True)
+    st.markdown('<div class="dd-grid-title">Bulk upload, scope-aware prompt updates and manual maintenance</div>', unsafe_allow_html=True)
+    bulk,manual=st.tabs(['Bulk Upload','Edit / Insert Prompts'])
     with bulk:
         pb1, pb2 = st.columns([2,1])
         with pb2:
@@ -444,5 +532,7 @@ with tab2:
             if d2.button('Reactivate Prompt') and api('POST',f"/prompts/{current['prompt_id']}/reactivate?user={st.session_state.current_user}"): st.success('Prompt reactivated.'); st.rerun()
 
 with tab3:
+    st.markdown('<div class="dd-section-label">Audit History</div>', unsafe_allow_html=True)
+    st.markdown('<div class="dd-grid-title">Traceable change history</div>', unsafe_allow_html=True)
     audit=api('GET','/audit')
     if audit: st.dataframe(pd.DataFrame(audit.json()),use_container_width=True,hide_index=True)
