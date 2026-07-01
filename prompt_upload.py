@@ -1,0 +1,81 @@
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Query
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+from DataDictionaryAdminApp.service.excel_service import ExcelService
+from DataDictionaryAdminApp.core.database import get_db
+from DataDictionaryAdminApp.service.data_dictionary_service import DataDictionaryService
+from DataDictionaryAdminApp.api.schemas_api import PromptUpsert
+from DataDictionaryAdminApp.utils.security import current_user
+
+router=APIRouter(prefix='/prompt-upload',tags=['Prompt Upload'])
+
+def _load(content: bytes, sheet_name: str):
+    raw=ExcelService().read_prompt_workbook(content,sheet_name)
+    return ExcelService.normalise_prompt_columns(raw)[0]
+
+@router.post('/sheets')
+async def sheets(file:UploadFile=File(...)):
+    return {'sheets':ExcelService().sheets(await file.read())}
+
+@router.post('/preview')
+async def preview(file:UploadFile=File(...),sheet_name:str=Form(...)):
+    try:
+        content = await file.read()
+        raw = ExcelService().read_prompt_workbook(content, sheet_name)
+        df, mapping = ExcelService.normalise_prompt_columns(raw)
+        return {
+            'sheet': sheet_name,
+            'row_count': len(df),
+            'columns': list(df.columns),
+            'column_mapping': mapping,
+            'preview': df.head(200).where(df.notna(), None).to_dict(orient='records'),
+        }
+    except Exception as e:
+        raise HTTPException(400, f'Unable to parse Prompt workbook: {e}')
+
+@router.post('/delta')
+async def delta(file:UploadFile=File(...),sheet_name:str=Form(...),db:Session=Depends(get_db)):
+    try:
+        df=_load(await file.read(),sheet_name)
+        valid={r[0] for r in db.execute(text('SELECT prj_id FROM dbo.prj_attribute_master_test')).all()}
+        invalid=sorted(set(df.prj_id)-valid)
+        existing={r[0] for r in db.execute(text('SELECT DISTINCT prj_id FROM dbo.prj_scanning_prompt_reference_test WHERE is_active=1')).all()}
+        return {'sheet':sheet_name,'rows':len(df),'new':int((~df.prj_id.isin(existing)).sum()),'update_candidates':int(df.prj_id.isin(existing).sum()),'invalid_prj_ids':invalid,'valid_rows':int(df.prj_id.isin(valid).sum()),'preview':df.head(200).where(df.notna(),None).to_dict(orient='records')}
+    except Exception as e: raise HTTPException(400,f'Unable to calculate prompt delta: {e}')
+
+@router.post('/finalize')
+async def finalize(file:UploadFile=File(...),sheet_name:str=Form(...),user:str|None=Query(None),db:Session=Depends(get_db)):
+    try:
+        df=_load(await file.read(),sheet_name)
+        valid={r[0] for r in db.execute(text('SELECT prj_id FROM dbo.prj_attribute_master_test')).all()}
+        service=DataDictionaryService(db); inserted=updated=0; rejected=[]
+        for _,row in df.iterrows():
+            prj=str(row['prj_id']).strip()
+            if prj not in valid:
+                rejected.append({'prj_id':prj,'reason':'PRJ ID does not exist in prj_attribute_master_test'}); continue
+            existing=db.execute(text('SELECT prompt_id FROM dbo.prj_scanning_prompt_reference_test WHERE prj_id=:prj AND attribute_name=:name AND is_active=1'),{'prj':prj,'name':None if row.get('attribute_name') is None else str(row.get('attribute_name'))}).first()
+            payload=PromptUpsert(prj_id=prj,attribute_name=None if row.get('attribute_name') is None else str(row.get('attribute_name')),attribute_description=None if row.get('attribute_description') is None else str(row.get('attribute_description')),section=None if row.get('section') is None else str(row.get('section')),sub_section=None if row.get('sub_section') is None else str(row.get('sub_section')),data_type=None if row.get('data_type') is None else str(row.get('data_type')),calculated_or_reported=None if row.get('calculated_or_reported') is None else str(row.get('calculated_or_reported')),calculation_logic=None if row.get('calculation_logic') is None else str(row.get('calculation_logic')),segment=None if row.get('segment') is None else str(row.get('segment')),display_order=None if row.get('display_order') is None or str(row.get('display_order'))=='nan' else int(float(row.get('display_order'))))
+            service.upsert_prompt(payload,current_user(user),existing[0] if existing else None,source='PROMPT_BULK_UPLOAD')
+            inserted += 0 if existing else 1; updated += 1 if existing else 0
+        return {'status':'completed','inserted':inserted,'updated':updated,'rejected':rejected,'rejected_count':len(rejected)}
+    except Exception as e:
+        db.rollback(); raise HTTPException(400,f'Prompt bulk commit failed: {e}')
+
+@router.post('/generate-sql')
+async def generate_sql(file: UploadFile = File(...), sheet_name: str = Form(...), mode: str = Query('INSERT_ONLY')):
+    """Generate reviewable SQL only. It never executes the generated script."""
+    try:
+        df = _load(await file.read(), sheet_name)
+        statements = ["-- Generated by Data Dictionary Admin App", f"-- Mode: {mode}", "SET NOCOUNT ON;", ""]
+        for _, row in df.iterrows():
+            prj = str(row.get('prj_id', '')).replace("'", "''")
+            name = str(row.get('attribute_name', '') or '').replace("'", "''")
+            description = str(row.get('attribute_description', '') or '').replace("'", "''")
+            if mode.upper() == 'MERGE':
+                statements.append("MERGE dbo.prj_scanning_prompt_reference_test AS target USING (SELECT '" + prj + "' AS prj_id, '" + name + "' AS attribute_name) AS source ON target.prj_id=source.prj_id AND ISNULL(target.attribute_name,'')=source.attribute_name WHEN MATCHED THEN UPDATE SET attribute_description='" + description + "', updated_at=GETDATE() WHEN NOT MATCHED THEN INSERT (prj_id,attribute_name,attribute_description,is_active,created_at,updated_at,created_by,updated_by) VALUES ('" + prj + "','" + name + "','" + description + "',1,GETDATE(),GETDATE(),'sysuser','sysuser');")
+            else:
+                statements.append("INSERT INTO dbo.prj_scanning_prompt_reference_test (prj_id,attribute_name,attribute_description,is_active,created_at,updated_at,created_by,updated_by) SELECT '" + prj + "','" + name + "','" + description + "',1,GETDATE(),GETDATE(),'sysuser','sysuser' WHERE NOT EXISTS (SELECT 1 FROM dbo.prj_scanning_prompt_reference_test WHERE prj_id='" + prj + "' AND ISNULL(attribute_name,'')='" + name + "' AND is_active=1);")
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse('\n'.join(statements), media_type='text/sql', headers={'Content-Disposition': 'attachment; filename=prompt_upload.sql'})
+    except Exception as exc:
+        raise HTTPException(400, f'Unable to generate SQL: {exc}')
