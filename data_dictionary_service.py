@@ -10,11 +10,14 @@ def _bit(value):
 
 
 def _scope_label(port_name, sector_name):
-    port, sector = str(port_name or '').strip().lower(), str(sector_name or '').strip().lower()
-    if port == 'fi' and sector == 'banks': return 'FI Banks'
-    if port == 'fi' and sector == 'insurance': return 'FI Insurance'
-    if port == 'corporate': return 'Corporates'
-    if port == 'zeus downstream': return 'Zeus Downstream'
+    """Resolve portfolio-reference variants to the canonical UI labels."""
+    port = str(port_name or '').strip().lower()
+    sector = str(sector_name or '').strip().lower()
+    combined = f"{port} {sector}".strip()
+    if port == 'fi' and ('bank' in sector or 'bank' in combined): return 'FI Banks'
+    if port == 'fi' and ('insurance' in sector or 'insurance' in combined): return 'FI Insurance'
+    if port in {'corporate', 'corporates'} or 'corporate' in combined: return 'Corporates'
+    if 'zeus' in combined and ('downstream' in combined or port == 'zeus'): return 'Zeus Downstream'
     return str(port_name or sector_name or '').strip()
 
 
@@ -46,10 +49,11 @@ class DataDictionaryService:
 
     def _sync_scopes(self, master, payload, user):
         """Creates/reactivates one scope for every selected Required By checkbox."""
-        wanted = {str(x).strip() for x in (payload.required_portfolios or [])}
+        # Canonicalise selections so the UI labels match existing portfolio-reference variants.
+        wanted = {str(x).strip().lower() for x in (payload.required_portfolios or [])}
         refs = self.db.execute(text("SELECT port_ref_id,port_name,sector_name FROM dbo.prj_portfolio_reference_test WHERE is_active=1 ORDER BY port_ref_id")).mappings().all()
         for ref in refs:
-            port_id = int(ref['port_ref_id']); label = _scope_label(ref['port_name'], ref['sector_name']); active = label in wanted
+            port_id = int(ref['port_ref_id']); label = _scope_label(ref['port_name'], ref['sector_name']); active = label.strip().lower() in wanted
             scope = self.db.execute(text("SELECT scope_id FROM dbo.prj_attribute_portfolio_scope_test WHERE prj_id=:prj AND port_ref_id=:port"), {'prj':master.prj_id,'port':port_id}).mappings().first()
             if active and not scope:
                 self.db.execute(text("""INSERT INTO dbo.prj_attribute_portfolio_scope_test
