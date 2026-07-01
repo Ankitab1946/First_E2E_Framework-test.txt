@@ -26,7 +26,7 @@ st.set_page_config(page_title='Data Dictionary Admin App',layout='wide')
 st.title(os.getenv('APP_NAME','Data Dictionary Streamlit Admin'))
 st.caption('Build: modal-parser-fix-verified')
 
-for key,value in {'latest_excel':None,'rows':[],'selected_attribute':None,'prompt_preview':None,'prompt_delta':None,'show_master_upload':False,'active_prompt':None,'app_role':'Admin','open_create_attribute_modal':False}.items():
+for key,value in {'latest_excel':None,'rows':[],'selected_attribute':None,'prompt_preview':None,'prompt_delta':None,'show_master_upload':False,'active_prompt':None,'app_role':'Admin','open_create_attribute_modal':False,'create_modal_generation':0}.items():
     st.session_state.setdefault(key,value)
 
 def api(method,path,quiet=False,**kwargs):
@@ -143,7 +143,9 @@ with tab1:
     x1,x2,x3,x4=st.columns(4)
     if x1.button('Add New Attribute',use_container_width=True):
         st.session_state['open_create_attribute_modal'] = True
+        st.session_state['create_modal_generation'] += 1
         st.session_state['selected_attribute'] = None
+        create_modal.open()
     if x2.button('Generate Latest Excel',use_container_width=True):
         rr=api('GET','/data-dictionary/download-latest')
         if rr: st.session_state['latest_excel']=rr.content
@@ -177,15 +179,22 @@ with tab1:
                     q=api('POST',f'/master-upload/finalize?user={st.session_state.current_user}',files=files)
                     if q: st.success(str(q.json()))
 
-if st.session_state.get('open_create_attribute_modal', False) and not create_modal.is_open():
-    create_modal.open()
-if create_modal.is_open():
-    with create_modal.container():
-        saved=payload_for_attribute()
-        if saved:
-            create_modal.close(); st.session_state['open_create_attribute_modal']=False; st.rerun()
-        if st.button('Close', key='create_close'):
-            create_modal.close(); st.session_state['open_create_attribute_modal']=False; st.rerun()
+if st.session_state.get('open_create_attribute_modal', False):
+    if not create_modal.is_open():
+        create_modal.open()
+    if create_modal.is_open():
+        with create_modal.container():
+            saved=payload_for_attribute()
+            if saved:
+                st.session_state['open_create_attribute_modal']=False
+                create_modal.close()
+                st.rerun()
+            if st.button('Close', key='create_close'):
+                # Clear the request flag first. This guarantees that a Streamlit rerun
+                # cannot reopen the modal after the user closes it.
+                st.session_state['open_create_attribute_modal']=False
+                create_modal.close()
+                st.rerun()
 if edit_modal.is_open():
     with edit_modal.container():
         if not st.session_state.get('edit_unlocked'):
@@ -243,10 +252,9 @@ with tab2:
             calc=st.text_area('Calculation Logic',value=str((current or {}).get('calculation_logic') or ''))
             c=st.columns(2); segment=c[0].text_input('Segment',value=str((current or {}).get('segment') or '')); required_scope=c[1].text_input('Required By Scope',value=str((current or {}).get('required_by_scope') or ''))
             description=st.text_area('Attribute Description',value=str((current or {}).get('attribute_description') or derived.get('prj_attribute_description') or ''))
-            examples=st.text_area('Examples',value=str((current or {}).get('examples') or ''))
             submit=st.form_submit_button('Update Prompt' if current else 'Create Prompt',type='primary')
         if submit:
-            pp={'prj_id':pid,'attribute_name':name,'section':sec,'sub_section':sub,'data_type':dtype,'calculation_logic':calc,'segment':segment,'required_by_scope':required_scope,'attribute_description':description,'examples':examples}
+            pp={'prj_id':pid,'attribute_name':name,'section':sec,'sub_section':sub,'data_type':dtype,'calculation_logic':calc,'segment':segment,'required_by_scope':required_scope,'attribute_description':description}
             path=f"/prompts/{current['prompt_id']}?user={st.session_state.current_user}" if current else f"/prompts?user={st.session_state.current_user}"
             rr=api('PUT' if current else 'POST',path,json=pp)
             if rr: st.success('Prompt saved successfully.'); st.rerun()
