@@ -5,6 +5,16 @@ from DataDictionaryAdminApp.model.entities import AttributeMaster, PortfolioRefe
 from DataDictionaryAdminApp.repositories.data_dictionary_repository import DataDictionaryRepository, PORTFOLIO_ALIASES
 from DataDictionaryAdminApp.utils.normalizers import physical_name
 
+
+def _bit(value):
+    """Convert UI/Excel Y/N/Yes/No/boolean values to SQL Server bit-compatible 0/1."""
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return 1 if value else 0
+    return 1 if str(value).strip().upper() in {'Y', 'YES', 'TRUE', '1'} else 0
+
+
 class DataDictionaryService:
     def __init__(self, db: Session): self.db, self.repo = db, DataDictionaryRepository(db)
     def _serialize(self, row): return {c.name: getattr(row,c.name) for c in row.__table__.columns}
@@ -47,7 +57,7 @@ class DataDictionaryService:
             if should and not rule:
                 self.db.execute(text("""INSERT INTO dbo.prj_attribute_business_rules_test
                     (scope_id,source_abbr_name,editable,symbol,mapping_type,mapping_logic,calculation_logic,business_logic,is_active,created_at,updated_at,created_by,updated_by)
-                    VALUES (:scope,:source,:editable,:symbol,:mapping_type,:mapping_logic,:calculation_logic,:business_logic,1,SYSUTCDATETIME(),SYSUTCDATETIME(),:user,:user)"""), {'scope':scope_id,'source':self._source_code(payload.source_name),'editable':payload.editable,'symbol':payload.symbol,'mapping_type':master.mapping_type,'mapping_logic':master.sp_as_reported_dataitem_logic,'calculation_logic':master.calculation_logic,'business_logic':payload.business_logic,'user':user})
+                    VALUES (:scope,:source,:editable,:symbol,:mapping_type,:mapping_logic,:calculation_logic,:business_logic,1,SYSUTCDATETIME(),SYSUTCDATETIME(),:user,:user)"""), {'scope':scope_id,'source':self._source_code(payload.source_name),'editable':_bit(payload.editable),'symbol':payload.symbol,'mapping_type':master.mapping_type,'mapping_logic':master.sp_as_reported_dataitem_logic,'calculation_logic':master.calculation_logic,'business_logic':payload.business_logic,'user':user})
             elif rule:
                 self.db.execute(text("UPDATE dbo.prj_attribute_business_rules_test SET is_active=:active, updated_at=SYSUTCDATETIME(), updated_by=:user WHERE scope_id=:scope"), {'active':1 if should else 0,'user':user,'scope':scope_id})
             prompt=self.db.execute(text("SELECT prompt_id FROM dbo.prj_scanning_prompt_reference_test WHERE prj_id=:prj AND scope_id=:scope"), {'prj':master.prj_id,'scope':scope_id}).mappings().first()
@@ -85,7 +95,7 @@ class DataDictionaryService:
         if payload.scope_id is None:
             scope = self.db.scalar(select(AttributePortfolioScope).where(
                 AttributePortfolioScope.prj_id == payload.prj_id,
-                AttributePortfolioScope.is_active == True,
+                AttributePortfolioScope.is_active == 1,
             ).order_by(AttributePortfolioScope.scope_id))
             if scope:
                 payload.scope_id = scope.scope_id
