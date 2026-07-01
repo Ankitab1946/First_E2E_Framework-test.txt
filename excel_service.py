@@ -180,4 +180,36 @@ class ExcelService:
         return self.build_latest_dicts([{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows])
 
     def read_master_workbook(self, content):
-        return pd.read_excel(BytesIO(content), sheet_name='PRJ Data Dictionary Mapping', header=2)
+        """Read the Master Dictionary template defensively.
+
+        The standard template has headers on row 3 (zero-based header=2).  Some
+        business workbooks contain a title/blank row variation, so we scan the
+        first 25 rows and select the row with the strongest Master Dictionary
+        header signature.  This avoids treating a data row as a header and makes
+        upload failures explainable instead of surfacing as a generic 500.
+        """
+        book = pd.ExcelFile(BytesIO(content))
+        sheet = 'PRJ Data Dictionary Mapping' if 'PRJ Data Dictionary Mapping' in book.sheet_names else book.sheet_names[0]
+        raw = pd.read_excel(BytesIO(content), sheet_name=sheet, header=None, dtype=object)
+        required = ('prjid', 'prjattributename')
+        preferred = ('prjattributedescription', 'requiredbycorporates', 'requiredbybanks', 'requiredbyinsurance', 'requiredbydownstream')
+        best_index, best_score = None, -1
+        for index in range(min(25, len(raw.index))):
+            values = [self._identifier(value) for value in raw.iloc[index].tolist() if pd.notna(value)]
+            if not all(any(token.startswith(item) for token in values) for item in required):
+                continue
+            score = sum(any(token.startswith(item) for token in values) for item in preferred)
+            if score > best_score:
+                best_index, best_score = index, score
+        if best_index is None:
+            raise ValueError(
+                "Master Dictionary header row was not found. Expected columns beginning with "
+                "'PRJ ID' and 'PRJ Attribute Name'."
+            )
+        df = pd.read_excel(BytesIO(content), sheet_name=sheet, header=best_index, dtype=object)
+        # Remove completely empty trailing rows and normalize invisible characters in headings.
+        df.columns = [str(column).replace('\xa0', ' ').replace('\u200b', '').strip() for column in df.columns]
+        df = df.dropna(how='all').reset_index(drop=True)
+        if df.empty:
+            raise ValueError('Master Dictionary workbook contains no data rows below the header.')
+        return df
