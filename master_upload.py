@@ -73,31 +73,49 @@ async def delta_master(file:UploadFile=File(...), db:Session=Depends(get_db), x_
 
 @router.post('/finalize')
 async def finalize_master(file:UploadFile=File(...), user:str|None=Query(None), db:Session=Depends(get_db), x_app_role: str | None = Header(None)):
+    """Finalize Master Dictionary upload and always return row-level diagnostic details."""
     if not is_admin_role(x_app_role):
         raise HTTPException(403, 'Admin role is required for Master Dictionary upload.')
     try:
-        df=ExcelService().read_master_workbook(await file.read())
+        content = await file.read()
+        df = ExcelService().read_master_workbook(content)
+        service=DataDictionaryService(db)
+        inserted=updated=0
+        rejected=[]
+        for row_no,(_,row) in enumerate(df.iterrows(), start=4):
+            row_input={str(k): _clean(v) for k,v in row.to_dict().items()}
+            try:
+                payload=_payload(row)
+                if not payload.prj_id or not payload.prj_attribute_name:
+                    rejected.append({'row':row_no,'prj_id':payload.prj_id or None,'error_type':'ValidationError','reason':'PRJ ID and PRJ Attribute Name are mandatory.','input':row_input})
+                    continue
+                exists=service.repo.get_attribute(payload.prj_id) is not None
+                service.upsert_attribute(payload,current_user(user),source='MASTER_EXCEL_UPLOAD')
+                if exists: updated += 1
+                else: inserted += 1
+            except Exception as exc:
+                db.rollback()
+                logger.exception('Master Dictionary upload failed at Excel row %s', row_no)
+                rejected.append({
+                    'row':row_no,
+                    'prj_id':row_input.get('PRJ ID') or row_input.get('PRJID'),
+                    'error_type':type(exc).__name__,
+                    'reason':str(getattr(exc, 'orig', exc)),
+                    'input':row_input,
+                    'trace_hint':'See FastAPI console output for full traceback.',
+                })
+        return {
+            'status':'completed' if not rejected else 'completed_with_rejections',
+            'inserted':inserted, 'updated':updated,
+            'rejected_count':len(rejected), 'rejected':rejected,
+        }
     except Exception as exc:
-        logger.exception('Master Dictionary workbook parsing failed')
-        raise HTTPException(400, {'message':'Unable to parse Master Dictionary workbook','error_type':type(exc).__name__,'reason':str(getattr(exc, 'orig', exc)),'trace_hint':'See FastAPI console log for the full traceback.'})
+        db.rollback()
+        logger.exception('Master Dictionary finalize failed before row processing')
+        raise HTTPException(500, {
+            'message':'Master Dictionary upload failed before row processing.',
+            'error_type':type(exc).__name__,
+            'reason':str(getattr(exc, 'orig', exc)),
+            'trace_hint':'See FastAPI console output for full traceback.',
+        })
 
-    service=DataDictionaryService(db); inserted=updated=0; rejected=[]
-    for row_no,(_,row) in enumerate(df.iterrows(), start=4):
-        row_input = {str(k): _clean(v) for k, v in row.to_dict().items()}
-        try:
-            payload=_payload(row)
-            if not payload.prj_id or not payload.prj_attribute_name:
-                rejected.append({'row':row_no,'prj_id':payload.prj_id or None,'error_type':'ValidationError','reason':'PRJ ID and PRJ Attribute Name are mandatory','input':row_input})
-                continue
-            exists=service.repo.get_attribute(payload.prj_id) is not None
-            service.upsert_attribute(payload,current_user(user),source='MASTER_EXCEL_UPLOAD')
-            inserted += 0 if exists else 1
-            updated += 1 if exists else 0
-        except Exception as exc:
-            db.rollback()
-            logger.exception('Master Dictionary upload failed for Excel row %s', row_no)
-            rejected.append({'row':row_no,'prj_id':row_input.get('PRJ ID'),'error_type':type(exc).__name__,'reason':str(getattr(exc, 'orig', exc)),'input':row_input,'trace_hint':'See FastAPI console log for full traceback.'})
-    if inserted or updated:
-        # each successful service operation commits; this is only defensive.
-        db.commit()
-    return {'status':'completed' if not rejected else 'completed_with_rejections', 'inserted':inserted, 'updated':updated, 'rejected':rejected, 'rejected_count':len(rejected)}
