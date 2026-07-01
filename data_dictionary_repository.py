@@ -68,6 +68,7 @@ class DataDictionaryRepository:
                 m.prj_physical_attribute_name,
                 CASE WHEN MAX(CAST(COALESCE(br.editable, 0) AS int)) = 1 THEN 'Y' ELSE 'N' END AS editable,
                 MAX(CASE WHEN br.symbol IS NOT NULL THEN br.symbol END) AS percent_ratio,
+                MAX(CASE WHEN br.source_abbr_name IS NOT NULL THEN br.source_abbr_name END) AS source,
                 m.version_update,
                 m.where_in_financial_statement,
                 MAX(CASE WHEN pr.port_name='Corporate' AND s.is_active=1 THEN 'Y' ELSE 'N' END) AS required_by_corporates,
