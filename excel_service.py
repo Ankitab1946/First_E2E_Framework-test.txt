@@ -28,32 +28,51 @@ class ExcelService:
         return pd.ExcelFile(BytesIO(content)).sheet_names
 
     def read_prompt_workbook(self, content, sheet_name):
-        """Read Prompt workbook using a header detector tolerant of real Excel variants.
+        """Read a Prompt worksheet with resilient header discovery.
 
-        The business column for ``attribute_name`` is any header containing both
-        Attribute and Name, with a preference for headers beginning ``Attribute Name``.
-        CFVID is never used as the attribute name.
+        Supports the supplied business header ``Attribute Name( to be Viewed on
+        Historical and HITL)`` and two-row/merged Excel headers.  CFVID is never
+        considered an attribute-name field.
         """
         raw = pd.read_excel(BytesIO(content), sheet_name=sheet_name, header=None, dtype=object)
         scan_limit = min(len(raw.index), 500)
-        best_row, best_score = None, -1
+
+        def cleaned(value):
+            return self._identifier(value)
+        def has_prj(values):
+            return any(v in {'prjid', 'cfvid'} or v.startswith('prjid') or v.startswith('projectid') for v in values)
+        def has_attr(values):
+            return any(v.startswith('attributename') or ('attribute' in v and 'name' in v) or v.startswith('prjattribute') for v in values)
+
+        candidates=[]
         for idx in range(scan_limit):
-            values = [v for v in raw.iloc[idx].tolist() if pd.notna(v) and str(v).strip()]
-            identifiers = [self._identifier(v) for v in values]
-            if not identifiers:
-                continue
-            has_prj = any(v in {'prjid', 'cfvid'} or v.startswith('prjid') or v.startswith('projectid') for v in identifiers)
-            has_attr = any(('attribute' in v and 'name' in v) or v.startswith('prjattribute') for v in identifiers)
-            has_desc = any('description' in v for v in identifiers)
-            score = (100 if has_attr else 0) + (25 if has_prj else 0) + (10 if has_desc else 0) + min(len(values), 20)
-            if has_attr and score > best_score:
-                best_row, best_score = idx, score
-        if best_row is None:
-            # Let normalise_prompt_columns return a precise error including detected headers.
-            best_row = 0
-        data = raw.iloc[best_row + 1:].copy()
-        data.columns = [str(x).strip() if pd.notna(x) else '' for x in raw.iloc[best_row].tolist()]
-        data = data.loc[:, [str(c).strip() != '' for c in data.columns]]
+            one=[cleaned(v) for v in raw.iloc[idx].tolist() if pd.notna(v) and str(v).strip()]
+            if has_prj(one) and has_attr(one):
+                candidates.append((idx, one, 3))
+            # Excel files sometimes use a merged/split two-row header.
+            if idx + 1 < scan_limit:
+                combined=[]
+                for a,b in zip(raw.iloc[idx].tolist(), raw.iloc[idx+1].tolist()):
+                    combined.append(cleaned(f"{'' if pd.isna(a) else a} {'' if pd.isna(b) else b}"))
+                if has_prj(combined) and has_attr(combined):
+                    candidates.append((idx, combined, 4))
+        if not candidates:
+            headers=[str(v) for v in raw.iloc[:min(scan_limit,20)].fillna('').values.flatten() if str(v).strip()]
+            raise ValueError("Prompt worksheet is missing an Attribute Name column. Expected a header starting with 'Attribute Name', for example 'Attribute Name( to be Viewed on Historical and HITL)'. Detected values: " + ', '.join(headers[:80]))
+        # Prefer a two-row header where it contains the full business description,
+        # otherwise choose the first valid header row.
+        idx, _, rows = max(candidates, key=lambda x: (x[2], sum('attributename' in y for y in x[1])))
+        if rows == 4:
+            headers=[]
+            for a,b in zip(raw.iloc[idx].tolist(), raw.iloc[idx+1].tolist()):
+                av='' if pd.isna(a) else str(a).strip(); bv='' if pd.isna(b) else str(b).strip()
+                headers.append((av + (' ' if av and bv else '') + bv).strip())
+            data=raw.iloc[idx+2:].copy()
+        else:
+            headers=[str(x).strip() if pd.notna(x) else '' for x in raw.iloc[idx].tolist()]
+            data=raw.iloc[idx+1:].copy()
+        data.columns=headers
+        data=data.loc[:, [str(c).strip() != '' for c in data.columns]]
         return data.reset_index(drop=True)
 
     @staticmethod
