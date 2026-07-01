@@ -210,7 +210,16 @@ if edit_modal.is_open():
 with tab2:
     bulk,manual=st.tabs(['Bulk Upload','Edit/Insert Prompts'])
     with bulk:
-        upload=st.file_uploader('Upload Prompt Excel',type=['xlsx'],key='prompt_file')
+        pb1, pb2 = st.columns([2,1])
+        with pb2:
+            if st.button('Download Latest Prompt File', use_container_width=True):
+                prompt_download = api('GET','/prompts/download-latest')
+                if prompt_download:
+                    st.session_state['latest_prompt_excel'] = prompt_download.content
+            if st.session_state.get('latest_prompt_excel'):
+                st.download_button('Download Prompt Excel', st.session_state['latest_prompt_excel'], 'prompt_latest.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', use_container_width=True)
+        with pb1:
+            upload=st.file_uploader('Upload Prompt Excel',type=['xlsx'],key='prompt_file')
         if upload:
             signature=f'{upload.name}:{upload.size}'
             if st.session_state.get('prompt_file_signature') != signature:
