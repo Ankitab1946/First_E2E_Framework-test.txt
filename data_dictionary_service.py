@@ -85,7 +85,7 @@ class DataDictionaryService:
         if payload.scope_id is None:
             scope = self.db.scalar(select(AttributePortfolioScope).where(
                 AttributePortfolioScope.prj_id == payload.prj_id,
-                AttributePortfolioScope.is_active.is_(True),
+                AttributePortfolioScope.is_active == True,
             ).order_by(AttributePortfolioScope.scope_id))
             if scope:
                 payload.scope_id = scope.scope_id
