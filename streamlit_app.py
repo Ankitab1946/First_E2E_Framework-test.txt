@@ -62,6 +62,15 @@ st.markdown("""
 .dd-grid-header p { color:white !important; font-weight:750; font-size:.78rem; margin:0; text-transform:uppercase; letter-spacing:.025em; }
 .dd-grid-row { background:white; padding:.12rem .05rem; min-height:31px; }
 .dd-grid-row p { font-size:.82rem; margin:.1rem 0; color:#243B53; overflow-wrap:anywhere; }
+/* Consistent colour system: dark surfaces use light text; light surfaces use dark text. */
+.dd-grid-row { border-bottom:1px solid #E7EDF4; }
+.dd-grid-row p { color:#102A43 !important; font-weight:500; }
+.dd-grid-header { background:#0B2D52 !important; }
+.dd-grid-header p { color:#FFFFFF !important; }
+[data-testid="stDataFrame"] [role="columnheader"] { background:#0B2D52 !important; color:#FFFFFF !important; }
+[data-testid="stDataFrame"] [role="gridcell"] { color:#102A43 !important; background:#FFFFFF !important; }
+.stAlert, [data-testid="stToast"] { border-radius:8px !important; }
+.stButton > button:hover, .stDownloadButton > button:hover { border-color:#1D4E89 !important; box-shadow:0 2px 8px rgba(29,78,137,.16); }
 </style>
 """, unsafe_allow_html=True)
 st.markdown(f"""
@@ -101,12 +110,16 @@ def clear_read_cache():
     cached_get_json.clear()
     cached_filter_json.clear()
 
-def api(method,path,quiet=False,**kwargs):
+def api(method,path,quiet=False,activity=None,**kwargs):
     headers=kwargs.pop('headers',{})
     headers['X-App-Environment']=st.session_state.get('env',os.getenv('SELECTED_ENVIRONMENT','LOCAL'))
     headers['X-App-Role']=st.session_state.get('app_role','Admin')
     try:
-        response=HTTP.request(method,API+path,headers=headers,timeout=180,**kwargs)
+        if activity:
+            with st.spinner(activity):
+                response=HTTP.request(method,API+path,headers=headers,timeout=180,**kwargs)
+        else:
+            response=HTTP.request(method,API+path,headers=headers,timeout=180,**kwargs)
     except requests.RequestException as exc:
         if not quiet: st.error(f'API connection failed: {exc}')
         return None
@@ -125,6 +138,8 @@ def api(method,path,quiet=False,**kwargs):
         return None
     if method.upper() != 'GET':
         clear_read_cache()
+        if activity:
+            st.toast(f'{activity} completed.', icon='✅')
     return response
 
 def json_get(path,fallback):
@@ -155,7 +170,12 @@ def render_row_radio_grid(rows, *, key: str, title: str, id_field: str, label_bu
     if id_field == 'prompt_id':
         preferred = ['prompt_id', 'prj_id', 'attribute_name', 'section', 'sub_section', 'display_order']
     else:
-        preferred = ['prj_id', 'prj_attribute_name', 'prj_attribute_description', 'where_in_financial_statement', 'editable']
+        preferred = [
+            'prj_id', 'prj_attribute_name', 'prj_attribute_description',
+            'source', 'where_in_financial_statement', 'editable', 'percent_ratio',
+            'required_by_fi_banks', 'required_by_corporates',
+            'required_by_fi_insurance', 'required_by_zeus_downstream'
+        ]
     display_columns = [col for col in preferred if any(col in row for row in selectable)]
     if not display_columns:
         display_columns = [col for col in selectable[0].keys() if col != 'Select'][:5]
@@ -189,7 +209,7 @@ def render_row_radio_grid(rows, *, key: str, title: str, id_field: str, label_bu
     header = st.columns(widths, gap='small')
     header[0].markdown('<div class="dd-grid-header"><p>Select</p></div>', unsafe_allow_html=True)
     for col, cell in zip(display_columns, header[1:]):
-        cell.markdown(f'<div class="dd-grid-header"><p>{col.replace("_", " ").title()}</p></div>', unsafe_allow_html=True)
+        cell.markdown(f'<div class="dd-grid-header"><p>{ {'required_by_fi_banks':'Required FI Banks', 'required_by_corporates':'Required Corporates', 'required_by_fi_insurance':'Required FI Insurance', 'required_by_zeus_downstream':'Required Zeus Downstream', 'where_in_financial_statement':'Section', 'prj_attribute_name':'Attribute Name', 'prj_attribute_description':'Attribute Description', 'percent_ratio':'Percent / Ratio'}.get(col, col.replace("_", " ").title())}</p></div>', unsafe_allow_html=True)
 
     selected_value = ''
     for index, row in enumerate(selectable):
@@ -285,7 +305,7 @@ def payload_for_attribute(existing=None):
         return False
     p = {'prj_id':prj_id or existing.get('prj_id'),'prj_attribute_name':name,'prj_attribute_description':description,'prj_physical_attribute_name':physical,'where_in_financial_statement':section,'version_update':version,'calculated_or_reported':calculated,'calculation_logic':calc_logic,'calculation_logic_details':calc_details,'sign_flipping_value':sign,'mapping_type':mapping_type,'calculated_in_cfv':cfv,'editable_in_historicals':historical,'required_portfolios':scopes,'source_name':source,'editable':editable,'symbol':symbol,'business_logic':business_logic}
     endpoint = f"/data-dictionary/attributes/{p['prj_id']}?user={st.session_state.get('current_user','sysuser')}" if is_edit else f"/data-dictionary/attributes?user={st.session_state.get('current_user','sysuser')}"
-    r = api('PUT' if is_edit else 'POST', endpoint, json=p)
+    r = api('PUT' if is_edit else 'POST', endpoint, json=p, activity='Updating attribute' if is_edit else 'Creating attribute')
     if r:
         st.success('Attribute saved successfully.')
         return True
@@ -363,10 +383,10 @@ with tab1:
     is_admin = st.session_state.get('app_role','Admin') == 'Admin'
     if y1.button('Upload and Compare Master Dictionary',use_container_width=True, disabled=not is_admin): st.session_state['show_master_upload']=not st.session_state['show_master_upload']
     if y2.button('Soft Delete Attribute',disabled=not selected,use_container_width=True):
-        if api('DELETE',f'/data-dictionary/attributes/{selected}?user={st.session_state.current_user}'):
+        if api('DELETE',f'/data-dictionary/attributes/{selected}?user={st.session_state.current_user}', activity='Soft deleting attribute'):
             st.success('Attribute soft deleted.'); st.rerun()
     if y3.button('Export to S3',use_container_width=True, disabled=not is_admin):
-        if api('POST',f'/s3/export?user={st.session_state.current_user}'): st.success('S3 export completed.')
+        if api('POST',f'/s3/export?user={st.session_state.current_user}', activity='Exporting data to S3'): st.success('S3 export completed.')
     if not is_admin:
         st.caption('Master Dictionary upload/compare and S3 export are visible to User role but can be executed only by Admin role.')
     if st.session_state['show_master_upload'] and is_admin:
@@ -422,7 +442,7 @@ with tab1:
             label_builder=lambda row: f"{row.get('prj_id')} | {row.get('prj_attribute_name') or row.get('attribute_name') or ''}",
         ) if deleted else ''
         if st.button('Reactivate Selected Attribute',disabled=not deleted_id):
-            if api('POST',f'/data-dictionary/attributes/{deleted_id}/reactivate?user={st.session_state.current_user}'):
+            if api('POST',f'/data-dictionary/attributes/{deleted_id}/reactivate?user={st.session_state.current_user}', activity='Reactivating attribute'):
                 st.success('Attribute reactivated.'); st.rerun()
 
 if st.session_state.get('open_create_attribute_modal', False):
@@ -434,6 +454,7 @@ if st.session_state.get('open_create_attribute_modal', False):
             if saved:
                 st.session_state['open_create_attribute_modal']=False
                 create_modal.close()
+                st.toast('Create Attribute window closed.', icon='ℹ️')
                 st.rerun()
             if st.button('Close', key='create_close'):
                 # Clear the request flag first. This guarantees that a Streamlit rerun
@@ -451,7 +472,7 @@ if edit_modal.is_open():
             saved=payload_for_attribute(st.session_state.get('selected_attribute'))
             if saved: edit_modal.close(); st.session_state['edit_unlocked']=False; st.rerun()
         if st.button('Close',key='edit_close'):
-            edit_modal.close(); st.session_state['edit_unlocked']=False; st.rerun()
+            edit_modal.close(); st.session_state['edit_unlocked']=False; st.toast('Edit Attribute window closed.', icon='ℹ️'); st.rerun()
 
 with tab2:
     st.markdown('<div class="dd-section-label">Prompt Management</div>', unsafe_allow_html=True)
@@ -493,7 +514,7 @@ with tab2:
                 p=api('POST','/prompt-upload/generate-sql?mode=MERGE',files=files,data={'sheet_name':sheet})
                 if p: st.download_button('Download MERGE SQL',p.content,'prompt_merge.sql',mime='text/sql')
             if sheet and c3.button('Commit Valid Rows'):
-                p=api('POST',f'/prompt-upload/finalize?user={st.session_state.current_user}',files=files,data={'sheet_name':sheet, 'target_scope':target_scope_value})
+                p=api('POST',f'/prompt-upload/finalize?user={st.session_state.current_user}',files=files,data={'sheet_name':sheet, 'target_scope':target_scope_value}, activity='Uploading prompt records')
                 if p: st.success(str(p.json())); st.rerun()
     with manual:
         st.subheader('Edit / Insert Prompts')
@@ -524,12 +545,12 @@ with tab2:
         if submit:
             pp={'prj_id':pid,'attribute_name':name,'section':sec,'sub_section':sub,'data_type':dtype,'calculation_logic':calc,'segment':segment,'required_by_scope':required_scope,'attribute_description':description}
             path=f"/prompts/{current['prompt_id']}?user={st.session_state.current_user}" if current else f"/prompts?user={st.session_state.current_user}"
-            rr=api('PUT' if current else 'POST',path,json=pp)
+            rr=api('PUT' if current else 'POST',path,json=pp, activity='Updating prompt' if current else 'Creating prompt')
             if rr: st.success('Prompt saved successfully.'); st.rerun()
         if current:
             d1,d2=st.columns(2)
-            if d1.button('Soft Delete Prompt') and api('DELETE',f"/prompts/{current['prompt_id']}?user={st.session_state.current_user}"): st.success('Prompt soft deleted.'); st.rerun()
-            if d2.button('Reactivate Prompt') and api('POST',f"/prompts/{current['prompt_id']}/reactivate?user={st.session_state.current_user}"): st.success('Prompt reactivated.'); st.rerun()
+            if d1.button('Soft Delete Prompt') and api('DELETE',f"/prompts/{current['prompt_id']}?user={st.session_state.current_user}", activity='Soft deleting prompt'): st.success('Prompt soft deleted.'); st.rerun()
+            if d2.button('Reactivate Prompt') and api('POST',f"/prompts/{current['prompt_id']}/reactivate?user={st.session_state.current_user}", activity='Reactivating prompt'): st.success('Prompt reactivated.'); st.rerun()
 
 with tab3:
     st.markdown('<div class="dd-section-label">Audit History</div>', unsafe_allow_html=True)
