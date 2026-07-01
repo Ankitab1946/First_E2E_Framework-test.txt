@@ -33,44 +33,38 @@ st.set_page_config(
     initial_sidebar_state='expanded',
 )
 
-# Professional enterprise styling using native Streamlit controls.
+# Simple light UI styling. Functional controls and API flows are unchanged.
 st.markdown("""
 <style>
-:root { --dd-navy:#0B2D52; --dd-blue:#1D4E89; --dd-border:#D9E2EC; --dd-muted:#52606D; }
-.stApp { background:#F6F8FB; }
-[data-testid="stHeader"] { background:rgba(246,248,251,.94); }
-.block-container { padding-top:1.35rem; padding-bottom:2.4rem; max-width:1700px; }
-.dd-hero { background:linear-gradient(135deg,#0B2D52,#1D4E89); border-radius:16px; color:white; padding:1.15rem 1.35rem; margin:0 0 1.15rem 0; box-shadow:0 8px 24px rgba(11,45,82,.16); }
-.dd-hero h1 { font-size:1.55rem; margin:0; font-weight:700; letter-spacing:-.02em; }
-.dd-hero p { margin:.28rem 0 0; font-size:.9rem; opacity:.88; }
-.dd-section-label { font-size:.76rem; text-transform:uppercase; letter-spacing:.09em; color:#1D4E89; font-weight:800; margin-bottom:.35rem; }
-.dd-grid-title { color:#0B2D52; font-size:1.05rem; font-weight:750; margin:.15rem 0 .65rem; }
-[data-testid="stSidebar"] { background:#0B2D52; }
-[data-testid="stSidebar"] * { color:#F8FBFF; }
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color:#C9D8E8 !important; }
-[data-testid="stSidebar"] .stSelectbox label, [data-testid="stSidebar"] .stTextInput label { color:#E9F2FB !important; }
-[data-testid="stSidebar"] [data-baseweb="select"] > div, [data-testid="stSidebar"] input { background:#F7FAFC !important; color:#102A43 !important; }
-[data-testid="stSidebar"] button { border-color:rgba(255,255,255,.34) !important; }
-.stTabs [data-baseweb="tab-list"] { gap:.45rem; border-bottom:1px solid #D9E2EC; }
-.stTabs [data-baseweb="tab"] { height:42px; padding:0 1.05rem; border-radius:9px 9px 0 0; color:#52606D; font-weight:650; }
-.stTabs [aria-selected="true"] { color:#0B2D52 !important; background:#FFF; border:1px solid #D9E2EC; border-bottom:2px solid white; }
-.stButton > button, .stDownloadButton > button { border-radius:8px; min-height:2.5rem; font-weight:650; border-color:#B8C7D9; }
-.stButton > button[kind="primary"] { background:#1D4E89; border-color:#1D4E89; }
-[data-testid="stExpander"] { background:white; border:1px solid #D9E2EC; border-radius:10px; overflow:hidden; }
-[data-testid="stDataFrame"] { border:1px solid #D9E2EC; border-radius:10px; overflow:hidden; background:white; }
-.dd-grid-header { background:#0B2D52; padding:.5rem .55rem; border-radius:8px 8px 0 0; margin-top:.35rem; }
-.dd-grid-header p { color:white !important; font-weight:750; font-size:.78rem; margin:0; text-transform:uppercase; letter-spacing:.025em; }
-.dd-grid-row { background:white; padding:.12rem .05rem; min-height:31px; }
-.dd-grid-row p { font-size:.82rem; margin:.1rem 0; color:#243B53; overflow-wrap:anywhere; }
-/* Consistent colour system: dark surfaces use light text; light surfaces use dark text. */
-.dd-grid-row { border-bottom:1px solid #E7EDF4; }
-.dd-grid-row p { color:#102A43 !important; font-weight:500; }
-.dd-grid-header { background:#0B2D52 !important; }
-.dd-grid-header p { color:#FFFFFF !important; }
-[data-testid="stDataFrame"] [role="columnheader"] { background:#0B2D52 !important; color:#FFFFFF !important; }
-[data-testid="stDataFrame"] [role="gridcell"] { color:#102A43 !important; background:#FFFFFF !important; }
-.stAlert, [data-testid="stToast"] { border-radius:8px !important; }
-.stButton > button:hover, .stDownloadButton > button:hover { border-color:#1D4E89 !important; box-shadow:0 2px 8px rgba(29,78,137,.16); }
+:root { --dd-primary:#2F5597; --dd-primary-dark:#203864; --dd-border:#B7C9DD; --dd-bg:#F7FAFC; --dd-text:#1F2937; --dd-muted:#52606D; }
+.stApp { background:var(--dd-bg); color:var(--dd-text); }
+[data-testid="stHeader"] { background:#FFFFFF; border-bottom:1px solid #D9E2EC; }
+.block-container { padding-top:1rem; padding-bottom:2rem; max-width:1600px; }
+.dd-hero { background:#EAF2FB; border:1px solid #B7C9DD; border-radius:8px; color:#203864; padding:1rem 1.15rem; margin:0 0 1rem 0; }
+.dd-hero h1 { font-size:1.45rem; margin:0; font-weight:700; color:#203864; }
+.dd-hero p { margin:.25rem 0 0; font-size:.9rem; color:#52606D; }
+.dd-section-label { font-size:.76rem; text-transform:uppercase; letter-spacing:.07em; color:#2F5597; font-weight:700; margin-bottom:.3rem; }
+.dd-grid-title { color:#203864; font-size:1.05rem; font-weight:700; margin:.15rem 0 .55rem; }
+[data-testid="stSidebar"] { background:#F4F7FB; border-right:1px solid #CBD5E1; }
+[data-testid="stSidebar"] * { color:#1F2937; }
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color:#52606D !important; }
+[data-testid="stSidebar"] [data-baseweb="select"] > div, [data-testid="stSidebar"] input { background:#FFFFFF !important; color:#1F2937 !important; border-color:#B7C9DD !important; }
+.stTabs [data-baseweb="tab-list"] { gap:.25rem; border-bottom:1px solid #C9D6E4; }
+.stTabs [data-baseweb="tab"] { height:40px; padding:0 .95rem; color:#52606D; font-weight:650; }
+.stTabs [aria-selected="true"] { color:#203864 !important; border-bottom:3px solid #2F5597 !important; }
+.stButton > button, .stDownloadButton > button { border-radius:6px; min-height:2.35rem; font-weight:650; border-color:#9FB6CF; color:#203864; background:#FFFFFF; }
+.stButton > button[kind="primary"] { background:#2F5597; border-color:#2F5597; color:#FFFFFF; }
+.stButton > button:hover, .stDownloadButton > button:hover { border-color:#2F5597 !important; background:#EEF5FC !important; }
+[data-testid="stExpander"] { background:#FFFFFF; border:1px solid #C9D6E4; border-radius:6px; }
+[data-testid="stDataFrame"] { border:1px solid #9FB6CF; border-radius:4px; overflow:hidden; background:#FFFFFF; }
+[data-testid="stDataFrame"] [role="columnheader"] { background:#2F5597 !important; color:#FFFFFF !important; font-weight:700 !important; }
+[data-testid="stDataFrame"] [role="gridcell"] { color:#1F2937 !important; background:#FFFFFF !important; border-bottom:1px solid #E5EDF5 !important; }
+.dd-grid-header { background:#2F5597; padding:.48rem .5rem; border:1px solid #24457B; }
+.dd-grid-header p { color:#FFFFFF !important; font-weight:700; font-size:.78rem; margin:0; }
+.dd-grid-row { background:#FFFFFF; padding:.35rem .45rem; border:1px solid #D6E0EB; min-height:34px; }
+.dd-grid-row p { color:#1F2937 !important; font-size:.82rem; margin:0; overflow-wrap:anywhere; }
+[data-testid="stVerticalBlockBorderWrapper"] { border-color:#D6E0EB !important; border-radius:4px !important; background:#FFFFFF; }
+.stAlert, [data-testid="stToast"] { border-radius:6px !important; }
 </style>
 """, unsafe_allow_html=True)
 st.markdown(f"""
