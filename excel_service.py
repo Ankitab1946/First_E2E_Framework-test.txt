@@ -110,15 +110,26 @@ class ExcelService:
             'calculation_logic': first(lambda c,i: i.startswith('calculationlogic')),
             'segment': first(lambda c,i: i.startswith('segment')),
             'attribute_description': first(lambda c,i: i.startswith('description') or 'proposedoneshotprompt' in i or 'description' in i),
+            'required_by_scope': first(lambda c,i: i.startswith('requiredbyscope'), lambda c,i: i in {'portfolio','sector','portfoliobusinessscope'}),
         }
         if not mapping['prj_id']:
             raise ValueError('Prompt worksheet is missing required PRJID/PRJ ID/CFVID column. Detected headers: ' + ', '.join(map(str, df.columns)))
         # Explicit business-header fallback. This covers spaces/punctuation variants such as
         # "Attribute Name( to be Viewed on Historical and HITL)".
-        if not mapping['attribute_name']:
+        # Exact business-column priority. This supports headers such as
+        # Attribute Name( to be Viewed on Historical and HITL), including Unicode spaces.
+        attribute_candidates = []
+        for column, ident in indexed:
+            raw = str(column).replace('\xa0', ' ').replace('\u200b', '').replace('\n', ' ').strip()
+            printable = re.sub(r'[^a-z0-9]+', ' ', raw.lower()).strip()
+            if ident.startswith('attributename') or printable.startswith('attribute name'):
+                attribute_candidates.append(column)
+        if attribute_candidates:
+            mapping['attribute_name'] = attribute_candidates[0]
+        elif not mapping['attribute_name']:
             for column, ident in indexed:
                 printable = re.sub(r'[^a-z0-9]+', ' ', str(column).lower()).strip()
-                if printable.startswith('attribute name') or 'attribute name' in printable:
+                if 'attribute name' in printable or ('attribute' in ident and 'name' in ident):
                     mapping['attribute_name'] = column
                     break
 
