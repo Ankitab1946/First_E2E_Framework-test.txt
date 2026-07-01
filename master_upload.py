@@ -90,7 +90,7 @@ async def finalize_master(file:UploadFile=File(...), user:str|None=Query(None), 
             updated += 1 if exists else 0
         except Exception as exc:
             db.rollback()
-            rejected.append({'row':row_no,'prj_id':payload.prj_id,'reason':f'{type(exc).__name__}: {exc}'})
+            rejected.append({'row':row_no,'prj_id':payload.prj_id,'reason':f'{type(exc).__name__}: {getattr(exc, 'orig', exc)}','input':payload.model_dump()})
     if inserted or updated:
         # each successful service operation commits; this is only defensive.
         db.commit()
