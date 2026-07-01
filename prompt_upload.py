@@ -44,7 +44,7 @@ async def delta(file:UploadFile=File(...),sheet_name:str=Form(...),db:Session=De
     except Exception as e: raise HTTPException(400,f'Unable to calculate prompt delta: {e}')
 
 @router.post('/finalize')
-async def finalize(file: UploadFile = File(...), sheet_name: str = Form(...), user: str | None = Query(None), db: Session = Depends(get_db)):
+async def finalize(file: UploadFile = File(...), sheet_name: str = Form(...), target_scope: str | None = Form(None), user: str | None = Query(None), db: Session = Depends(get_db)):
     """Upserts selected workbook rows into the existing prompt placeholder for every active scope."""
     try:
         df = _load(await file.read(), sheet_name)
@@ -60,13 +60,33 @@ async def finalize(file: UploadFile = File(...), sheet_name: str = Form(...), us
                 def value(name):
                     v=row.get(name)
                     return None if v is None or str(v).strip().lower() in {'','nan','none'} else str(v).strip()
-                existing_count = db.execute(text('SELECT COUNT(*) FROM dbo.prj_scanning_prompt_reference_test WHERE prj_id=:prj AND is_active=1'), {'prj':prj}).scalar() or 0
+                scopes = service.active_scopes(prj)
+                # Resolve the target scope from the Excel Required By Scope column first,
+                # then the UI selection. A multi-scope PRJ must never be updated across
+                # all scopes by accident.
+                requested_scope = value('required_by_scope') or (target_scope or '').strip() or None
+                if requested_scope:
+                    requested_norm = requested_scope.strip().lower()
+                    matching = [scope for scope in scopes if (
+                        ('fi banks' if str(scope['port_name']).lower() == 'fi' and str(scope['sector_name']).lower() == 'banks'
+                         else 'fi insurance' if str(scope['port_name']).lower() == 'fi' and str(scope['sector_name']).lower() == 'insurance'
+                         else 'corporates' if str(scope['port_name']).lower() == 'corporate'
+                         else 'zeus downstream' if str(scope['port_name']).lower() == 'zeus downstream'
+                         else str(scope['port_name'])).lower() == requested_norm)]
+                    if not matching:
+                        raise ValueError(f"No active scope matching '{requested_scope}' exists for PRJ ID {prj}")
+                    scope = matching[0]
+                elif len(scopes) == 1:
+                    scope = scopes[0]
+                else:
+                    raise ValueError(f"PRJ ID {prj} has multiple active scopes. Select Target Portfolio/Scope or add a Required By Scope column to the workbook.")
+                existing_count = db.execute(text('SELECT COUNT(*) FROM dbo.prj_scanning_prompt_reference_test WHERE prj_id=:prj AND scope_id=:scope AND is_active=1'), {'prj':prj, 'scope':int(scope['scope_id'])}).scalar() or 0
                 display = value('display_order')
-                payload=PromptUpsert(prj_id=prj,attribute_name=value('attribute_name'),display_order=int(float(display)) if display else None,
-                    section=value('section'),sub_section=value('sub_section'),data_type=value('data_type'),calculated_or_reported=value('calculated_or_reported'),calculation_logic=value('calculation_logic'),segment=value('segment'),attribute_description=value('attribute_description'))
+                payload=PromptUpsert(scope_id=int(scope['scope_id']), prj_id=prj, attribute_name=value('attribute_name'),display_order=int(float(display)) if display else None,
+                    section=value('section'),sub_section=value('sub_section'),data_type=value('data_type'),calculated_or_reported=value('calculated_or_reported'),calculation_logic=value('calculation_logic'),segment=value('segment'),attribute_description=value('attribute_description'), required_by_scope=requested_scope)
                 service.upsert_prompt(payload,current_user(user),source='PROMPT_BULK_UPLOAD')
-                if existing_count: updated += max(1,len(service.active_scopes(prj)))
-                else: inserted += max(1,len(service.active_scopes(prj)))
+                if existing_count: updated += 1
+                else: inserted += 1
             except Exception as exc:
                 db.rollback(); rejected.append({'row':int(excel_row)+1,'prj_id':prj,'reason':f'{type(exc).__name__}: {getattr(exc,"orig",exc)}'})
         return {'status':'completed' if not rejected else 'completed_with_rejections','inserted':inserted,'updated':updated,'rejected':rejected,'rejected_count':len(rejected)}
