@@ -60,41 +60,87 @@ def json_get(path,fallback):
 def flag(value): return str(value or '').strip().upper() in {'Y','YES','1','TRUE'}
 
 def render_row_radio_grid(rows, *, key: str, title: str, id_field: str, label_builder):
-    """Render one native Streamlit radio control per displayed record, aligned beside the grid.
+    """Render a table-aligned single-select control.
 
-    A single st.radio group is deliberately used so selecting a record automatically
-    clears the previous selection. The radio items are positioned in a dedicated
-    Select column next to the corresponding tabular rows.
+    Streamlit cannot place an interactive native ``st.radio`` inside a
+    ``st.dataframe`` cell. This renderer therefore builds the table row-by-row:
+    the first column contains a radio-styled native control and every following
+    cell is rendered in the same row. State callbacks make the controls mutually
+    exclusive, so only one record can be selected at a time.
     """
     if not rows:
         st.info('No records found.')
         return ''
-    options = [str(row.get(id_field, '')) for row in rows if row.get(id_field) not in (None, '')]
-    if not options:
+
+    selectable = [row for row in rows if row.get(id_field) not in (None, '')]
+    if not selectable:
         st.info('No selectable records found.')
         return ''
-    labels = {str(row.get(id_field)): label_builder(row) for row in rows if row.get(id_field) not in (None, '')}
-    left, right = st.columns([0.75, 12], gap='small')
-    with left:
-        st.markdown('**Select**')
-        # Native radio options are rendered vertically: exactly one clickable radio per row.
-        selected = st.radio(
-            title,
-            options,
-            key=key,
-            label_visibility='collapsed',
-            format_func=lambda option: ' ',
+
+    # Keep the grid compact and readable while preserving the important columns.
+    if id_field == 'prompt_id':
+        preferred = ['prompt_id', 'prj_id', 'attribute_name', 'section', 'sub_section', 'display_order']
+    else:
+        preferred = ['prj_id', 'prj_attribute_name', 'prj_attribute_description', 'where_in_financial_statement', 'editable']
+    display_columns = [col for col in preferred if any(col in row for row in selectable)]
+    if not display_columns:
+        display_columns = [col for col in selectable[0].keys() if col != 'Select'][:5]
+
+    # Render a small scoped CSS rule for each row selector, making the checkbox
+    # visually circular while retaining native Streamlit click behaviour.
+    css_rules = []
+    state_keys = []
+    for index, _row in enumerate(selectable):
+        state_key = f'{key}__row_{index}'
+        state_keys.append(state_key)
+        css_rules.append(
+            f".st-key-{state_key} [data-testid=\"stCheckbox\"] label > div:first-child "
+            "{border-radius:50% !important;}"
         )
-    with right:
-        table_rows = []
-        for row in rows:
-            copied = dict(row)
-            copied.pop('Select', None)
-            table_rows.append(copied)
-        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True, height=min(38 * (len(table_rows) + 1) + 8, 500))
-    selected_label = labels.get(selected, selected)
-    st.caption(f'Selected: {selected_label}')
-    return selected
+    st.markdown('<style>' + ''.join(css_rules) + '</style>', unsafe_allow_html=True)
+
+    selected_state_key = f'{key}__selected'
+
+    def choose_row(changed_key: str):
+        if st.session_state.get(changed_key):
+            for other_key in state_keys:
+                if other_key != changed_key:
+                    st.session_state[other_key] = False
+            st.session_state[selected_state_key] = changed_key
+        elif st.session_state.get(selected_state_key) == changed_key:
+            st.session_state[selected_state_key] = None
+
+    # Header row.
+    widths = [0.65] + [1.6 if col in {'prj_attribute_description', 'attribute_name'} else 1.1 for col in display_columns]
+    header = st.columns(widths, gap='small')
+    header[0].markdown('**Select**')
+    for col, cell in zip(display_columns, header[1:]):
+        cell.markdown(f"**{col.replace('_', ' ').title()}**")
+
+    selected_value = ''
+    for index, row in enumerate(selectable):
+        state_key = state_keys[index]
+        if state_key not in st.session_state:
+            st.session_state[state_key] = False
+        row_cells = st.columns(widths, gap='small')
+        with row_cells[0]:
+            st.checkbox(
+                '',
+                key=state_key,
+                label_visibility='collapsed',
+                on_change=choose_row,
+                args=(state_key,),
+            )
+        for col, cell in zip(display_columns, row_cells[1:]):
+            value = row.get(col, '')
+            if value is None:
+                value = ''
+            cell.write(str(value))
+        if st.session_state.get(state_key):
+            selected_value = str(row.get(id_field, ''))
+
+    st.caption('Select exactly one record. Selecting another row automatically clears the earlier selection.')
+    return selected_value
 
 
 def keep_one_active_attribute_selection():
