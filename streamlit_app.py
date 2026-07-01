@@ -77,9 +77,9 @@ def payload_for_attribute(existing=None):
     source = c[2].selectbox('Source Name', source_options, index=source_options.index(existing.get('source_name')) if existing.get('source_name') in source_options else 0, disabled=readonly, key=f'{prefix}_source')
     st.markdown('**Required By**')
     c = st.columns(4)
-    banks = c[0].checkbox('Required by FI Banks', value=flag(existing.get('required_by_banks')) or 'FI Banks' in existing.get('required_portfolios', []), disabled=readonly, key=f'{prefix}_banks')
+    banks = c[0].checkbox('Required by FI Banks', value=flag(existing.get('required_by_banks') or existing.get('required_by_fi_banks')) or 'FI Banks' in existing.get('required_portfolios', []), disabled=readonly, key=f'{prefix}_banks')
     corporates = c[1].checkbox('Required by Corporates', value=flag(existing.get('required_by_corporates')) or 'Corporates' in existing.get('required_portfolios', []), disabled=readonly, key=f'{prefix}_corporates')
-    insurance = c[2].checkbox('Required by FI Insurance', value=flag(existing.get('required_by_insurance')) or 'FI Insurance' in existing.get('required_portfolios', []), disabled=readonly, key=f'{prefix}_insurance')
+    insurance = c[2].checkbox('Required by FI Insurance', value=flag(existing.get('required_by_insurance') or existing.get('required_by_fi_insurance')) or 'FI Insurance' in existing.get('required_portfolios', []), disabled=readonly, key=f'{prefix}_insurance')
     zeus = c[3].checkbox('Required by Zeus Downstream', value=flag(existing.get('required_by_zeus_downstream')) or 'Zeus Downstream' in existing.get('required_portfolios', []), disabled=readonly, key=f'{prefix}_zeus')
     c = st.columns(2)
     calc_logic = c[0].text_area('Calculation Logic', value=str(existing.get('calculation_logic') or ''), disabled=readonly, key=f'{prefix}_calc_logic')
@@ -141,10 +141,26 @@ with tab1:
     rows=r.json() if r else []
     st.session_state['rows']=rows
     grid_df = pd.DataFrame(rows)
-    st.dataframe(grid_df, use_container_width=True, hide_index=True)
+    if not grid_df.empty:
+        selection_df = grid_df.copy()
+        selection_df.insert(0, 'Select', False)
+        edited_grid = st.data_editor(
+            selection_df, use_container_width=True, hide_index=True, key='active_attribute_grid',
+            column_config={'Select': st.column_config.CheckboxColumn('Select', help='Select exactly one row to edit or soft delete.', default=False)},
+            disabled=[column for column in selection_df.columns if column != 'Select']
+        )
+        selected_rows = edited_grid.loc[edited_grid['Select'] == True, 'prj_id'].astype(str).tolist()
+    else:
+        st.info('No active records found for the selected filters.')
+        selected_rows = []
+    if len(selected_rows) > 1:
+        st.error('Select exactly one active attribute at a time. Clear the additional row selections before Edit or Soft Delete.')
+    selected = selected_rows[0] if len(selected_rows) == 1 else ''
     active_ids=[str(x.get('prj_id')) for x in rows if x.get('prj_id')]
-    # A selectbox guarantees exactly one record can be selected at a time.
-    grid_selected_prj=st.selectbox('Select one active attribute to Edit or Soft Delete',['']+active_ids,key='active_attribute_selector')
+    # Dropdown remains available as an accessibility fallback; the grid selection takes precedence.
+    fallback_selected = st.selectbox('Or select one active attribute', [''] + active_ids, key='active_attribute_selector')
+    if not selected and fallback_selected:
+        selected = fallback_selected
     x1,x2,x3,x4=st.columns(4)
     if x1.button('Add New Attribute',use_container_width=True):
         st.session_state['open_create_attribute_modal'] = True
@@ -156,7 +172,6 @@ with tab1:
         if rr: st.session_state['latest_excel']=rr.content
     if st.session_state['latest_excel']:
         x2.download_button('Download Latest Data',st.session_state['latest_excel'],'data_dictionary_latest.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',use_container_width=True)
-    selected = grid_selected_prj
     if x4.button('Open / Edit Selected Attribute',disabled=not selected,use_container_width=True):
         rr=api('GET',f'/data-dictionary/attributes/{selected}')
         if rr: st.session_state['selected_attribute']=rr.json(); st.session_state['edit_unlocked']=False; edit_modal.open()
@@ -164,7 +179,8 @@ with tab1:
     is_admin = st.session_state.get('app_role','Admin') == 'Admin'
     if y1.button('Upload and Compare Master Dictionary',use_container_width=True, disabled=not is_admin): st.session_state['show_master_upload']=not st.session_state['show_master_upload']
     if y2.button('Soft Delete Attribute',disabled=not selected,use_container_width=True):
-        if api('DELETE',f'/data-dictionary/attributes/{selected}?user={st.session_state.current_user}'): st.success('Attribute soft deleted.')
+        if api('DELETE',f'/data-dictionary/attributes/{selected}?user={st.session_state.current_user}'):
+            st.success('Attribute soft deleted.'); st.rerun()
     if y3.button('Export to S3',use_container_width=True, disabled=not is_admin):
         if api('POST',f'/s3/export?user={st.session_state.current_user}'): st.success('S3 export completed.')
     if not is_admin:
@@ -248,6 +264,8 @@ with tab2:
             files={'file':(upload.name,upload.getvalue(),upload.type or 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
             sr=api('POST','/prompt-upload/sheets',files=files); sheets=sr.json().get('sheets',[]) if sr else []
             sheet=st.selectbox('Workbook sheet',sheets,key='prompt_sheet') if sheets else None
+            target_scope=st.selectbox('Target Portfolio / Scope for bulk update', ['Auto from Excel / single-scope PRJ','FI Banks','Corporates','FI Insurance','Zeus Downstream'], key='prompt_target_scope', help='For PRJ IDs with multiple active scopes, choose the one scope to update. Excel Required By Scope overrides this selection.')
+            target_scope_value = '' if target_scope == 'Auto from Excel / single-scope PRJ' else target_scope
             if sheet and st.button('Load Selected Data'):
                 p=api('POST','/prompt-upload/preview',files=files,data={'sheet_name':sheet})
                 if p: st.session_state['prompt_preview']=p.json()
@@ -262,8 +280,8 @@ with tab2:
                 p=api('POST','/prompt-upload/generate-sql?mode=MERGE',files=files,data={'sheet_name':sheet})
                 if p: st.download_button('Download MERGE SQL',p.content,'prompt_merge.sql',mime='text/sql')
             if sheet and c3.button('Commit Valid Rows'):
-                p=api('POST',f'/prompt-upload/finalize?user={st.session_state.current_user}',files=files,data={'sheet_name':sheet})
-                if p: st.success(str(p.json()))
+                p=api('POST',f'/prompt-upload/finalize?user={st.session_state.current_user}',files=files,data={'sheet_name':sheet, 'target_scope':target_scope_value})
+                if p: st.success(str(p.json())); st.rerun()
     with manual:
         st.subheader('Edit / Insert Prompts')
         prompts=json_get('/prompts',[])
