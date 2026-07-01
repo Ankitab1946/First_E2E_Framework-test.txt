@@ -1,4 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Header
+import logging
+import traceback
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from DataDictionaryAdminApp.service.excel_service import ExcelService
@@ -8,6 +10,7 @@ from DataDictionaryAdminApp.core.database import get_db
 from DataDictionaryAdminApp.utils.security import current_user, is_admin_role
 
 router=APIRouter(prefix='/master-upload',tags=['Master Dictionary Upload'])
+logger = logging.getLogger(__name__)
 
 def _clean(value):
     if value is None: return None
@@ -79,18 +82,20 @@ async def finalize_master(file:UploadFile=File(...), user:str|None=Query(None), 
 
     service=DataDictionaryService(db); inserted=updated=0; rejected=[]
     for row_no,(_,row) in enumerate(df.iterrows(), start=4):
-        payload=_payload(row)
-        if not payload.prj_id or not payload.prj_attribute_name:
-            rejected.append({'row':row_no,'prj_id':payload.prj_id or None,'reason':'PRJ ID and PRJ Attribute Name are mandatory'})
-            continue
+        row_input = {str(k): _clean(v) for k, v in row.to_dict().items()}
         try:
+            payload=_payload(row)
+            if not payload.prj_id or not payload.prj_attribute_name:
+                rejected.append({'row':row_no,'prj_id':payload.prj_id or None,'error_type':'ValidationError','reason':'PRJ ID and PRJ Attribute Name are mandatory','input':row_input})
+                continue
             exists=service.repo.get_attribute(payload.prj_id) is not None
             service.upsert_attribute(payload,current_user(user),source='MASTER_EXCEL_UPLOAD')
             inserted += 0 if exists else 1
             updated += 1 if exists else 0
         except Exception as exc:
             db.rollback()
-            rejected.append({'row':row_no,'prj_id':payload.prj_id,'reason':f'{type(exc).__name__}: {getattr(exc, 'orig', exc)}','input':payload.model_dump()})
+            logger.exception('Master Dictionary upload failed for Excel row %s', row_no)
+            rejected.append({'row':row_no,'prj_id':row_input.get('PRJ ID'),'error_type':type(exc).__name__,'reason':str(getattr(exc, 'orig', exc)),'input':row_input,'trace_hint':'See FastAPI console log for full traceback.'})
     if inserted or updated:
         # each successful service operation commits; this is only defensive.
         db.commit()
