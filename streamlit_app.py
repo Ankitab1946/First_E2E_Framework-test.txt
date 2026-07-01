@@ -135,23 +135,16 @@ with tab1:
     a,b,c,d=st.columns(4)
     pf=a.multiselect('Portfolio/Sector',PORTFOLIOS)
     prj=b.text_input('PRJ ID filter'); name=c.text_input('Attribute Name filter'); section=d.selectbox('Section filter',['']+sections)
-    e,f=st.columns(2); desc=e.text_input('Attribute Description filter'); include_deleted=f.checkbox('View soft deleted records'); overlap=f.checkbox('Overlapped Attribute only')
-    r=api('POST','/data-dictionary/filter',json={'portfolios':[] if 'ALL' in pf else pf,'prj_id':prj or None,'attribute_name':name or None,'attribute_description':desc or None,'section':section or None,'include_deleted':include_deleted,'overlapped_only':overlap})
+    e,f=st.columns(2); desc=e.text_input('Attribute Description filter'); overlap=f.checkbox('Overlapped Attribute only')
+    # View Latest is intentionally active-only. Deleted records are handled in the separate Reactivate section below.
+    r=api('POST','/data-dictionary/filter',json={'portfolios':[] if 'ALL' in pf else pf,'prj_id':prj or None,'attribute_name':name or None,'attribute_description':desc or None,'section':section or None,'include_deleted':False,'overlapped_only':overlap})
     rows=r.json() if r else []
     st.session_state['rows']=rows
     grid_df = pd.DataFrame(rows)
-    if not grid_df.empty:
-        grid_df.insert(0, 'Select', False)
-        edited_grid = st.data_editor(grid_df, hide_index=True, use_container_width=True,
-                                     column_config={'Select': st.column_config.CheckboxColumn('Select', help='Select one record to edit or soft delete')},
-                                     disabled=[column for column in grid_df.columns if column != 'Select'], key='attribute_grid_editor')
-        selected_rows = edited_grid[edited_grid['Select'] == True]
-        if len(selected_rows) > 1:
-            st.warning('Select only one record for Edit or Soft Delete.')
-        grid_selected_prj = str(selected_rows.iloc[0]['prj_id']) if len(selected_rows) == 1 else ''
-    else:
-        st.dataframe(grid_df, use_container_width=True, hide_index=True)
-        grid_selected_prj = ''
+    st.dataframe(grid_df, use_container_width=True, hide_index=True)
+    active_ids=[str(x.get('prj_id')) for x in rows if x.get('prj_id')]
+    # A selectbox guarantees exactly one record can be selected at a time.
+    grid_selected_prj=st.selectbox('Select one active attribute to Edit or Soft Delete',['']+active_ids,key='active_attribute_selector')
     x1,x2,x3,x4=st.columns(4)
     if x1.button('Add New Attribute',use_container_width=True):
         st.session_state['open_create_attribute_modal'] = True
@@ -163,7 +156,7 @@ with tab1:
         if rr: st.session_state['latest_excel']=rr.content
     if st.session_state['latest_excel']:
         x2.download_button('Download Latest Data',st.session_state['latest_excel'],'data_dictionary_latest.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',use_container_width=True)
-    selected = grid_selected_prj or x3.selectbox('Selected PRJ ID (dropdown fallback)',['']+[str(x.get('prj_id','')) for x in rows])
+    selected = grid_selected_prj
     if x4.button('Open / Edit Selected Attribute',disabled=not selected,use_container_width=True):
         rr=api('GET',f'/data-dictionary/attributes/{selected}')
         if rr: st.session_state['selected_attribute']=rr.json(); st.session_state['edit_unlocked']=False; edit_modal.open()
@@ -189,7 +182,21 @@ with tab1:
                     if q: st.json(q.json())
                 if m2.button('Finalize and Upload to Database'):
                     q=api('POST',f'/master-upload/finalize?user={st.session_state.current_user}',files=files)
-                    if q: st.success(str(q.json()))
+                    if q:
+                        result=q.json(); st.success(str(result))
+                        if result.get('rejected'):
+                            st.error('Rejected rows with detailed root cause:')
+                            st.dataframe(pd.DataFrame(result['rejected']),use_container_width=True,hide_index=True)
+                        st.rerun()
+    with st.expander('View Deleted Attributes and Reactivate'):
+        deleted_response=api('POST','/data-dictionary/filter',json={'portfolios':[],'include_deleted':True})
+        deleted=[x for x in (deleted_response.json() if deleted_response else []) if not x.get('is_active')]
+        st.dataframe(pd.DataFrame(deleted),use_container_width=True,hide_index=True)
+        deleted_ids=[str(x.get('prj_id')) for x in deleted if x.get('prj_id')]
+        deleted_id=st.selectbox('Select one deleted PRJ ID to reactivate',['']+deleted_ids,key='deleted_attribute_selector')
+        if st.button('Reactivate Selected Attribute',disabled=not deleted_id):
+            if api('POST',f'/data-dictionary/attributes/{deleted_id}/reactivate?user={st.session_state.current_user}'):
+                st.success('Attribute reactivated.'); st.rerun()
 
 if st.session_state.get('open_create_attribute_modal', False):
     if not create_modal.is_open():
@@ -260,6 +267,8 @@ with tab2:
     with manual:
         st.subheader('Edit / Insert Prompts')
         prompts=json_get('/prompts',[])
+        st.caption('Active Prompt Records')
+        st.dataframe(pd.DataFrame(prompts),use_container_width=True,hide_index=True)
         choices=['Create new prompt']+[f"{p.get('prompt_id')} | {p.get('prj_id')} | {p.get('attribute_name') or ''}" for p in prompts]
         choice=st.selectbox('Prompt record',choices)
         current=None if choice=='Create new prompt' else prompts[choices.index(choice)-1]
