@@ -44,22 +44,34 @@ async def delta(file:UploadFile=File(...),sheet_name:str=Form(...),db:Session=De
     except Exception as e: raise HTTPException(400,f'Unable to calculate prompt delta: {e}')
 
 @router.post('/finalize')
-async def finalize(file:UploadFile=File(...),sheet_name:str=Form(...),user:str|None=Query(None),db:Session=Depends(get_db)):
+async def finalize(file: UploadFile = File(...), sheet_name: str = Form(...), user: str | None = Query(None), db: Session = Depends(get_db)):
+    """Upserts selected workbook rows into the existing prompt placeholder for every active scope."""
     try:
-        df=_load(await file.read(),sheet_name)
-        valid={r[0] for r in db.execute(text('SELECT prj_id FROM dbo.prj_attribute_master_test')).all()}
-        service=DataDictionaryService(db); inserted=updated=0; rejected=[]
-        for _,row in df.iterrows():
-            prj=str(row['prj_id']).strip()
-            if prj not in valid:
-                rejected.append({'prj_id':prj,'reason':'PRJ ID does not exist in prj_attribute_master_test'}); continue
-            existing=db.execute(text('SELECT prompt_id FROM dbo.prj_scanning_prompt_reference_test WHERE prj_id=:prj AND attribute_name=:name AND is_active=1'),{'prj':prj,'name':None if row.get('attribute_name') is None else str(row.get('attribute_name'))}).first()
-            payload=PromptUpsert(prj_id=prj,attribute_name=None if row.get('attribute_name') is None else str(row.get('attribute_name')),attribute_description=None if row.get('attribute_description') is None else str(row.get('attribute_description')),section=None if row.get('section') is None else str(row.get('section')),sub_section=None if row.get('sub_section') is None else str(row.get('sub_section')),data_type=None if row.get('data_type') is None else str(row.get('data_type')),calculated_or_reported=None if row.get('calculated_or_reported') is None else str(row.get('calculated_or_reported')),calculation_logic=None if row.get('calculation_logic') is None else str(row.get('calculation_logic')),segment=None if row.get('segment') is None else str(row.get('segment')),display_order=None if row.get('display_order') is None or str(row.get('display_order'))=='nan' else int(float(row.get('display_order'))))
-            service.upsert_prompt(payload,current_user(user),existing[0] if existing else None,source='PROMPT_BULK_UPLOAD')
-            inserted += 0 if existing else 1; updated += 1 if existing else 0
-        return {'status':'completed','inserted':inserted,'updated':updated,'rejected':rejected,'rejected_count':len(rejected)}
-    except Exception as e:
-        db.rollback(); raise HTTPException(400,f'Prompt bulk commit failed: {e}')
+        df = _load(await file.read(), sheet_name)
+        valid = {str(r[0]) for r in db.execute(text('SELECT prj_id FROM dbo.prj_attribute_master_test WHERE is_active=1')).all()}
+        service = DataDictionaryService(db)
+        inserted = updated = 0; rejected = []
+        for excel_row, row in df.iterrows():
+            prj = str(row.get('prj_id') or '').strip()
+            if not prj or prj.lower() == 'nan' or prj not in valid:
+                rejected.append({'row': int(excel_row)+1, 'prj_id':prj or None, 'reason':'PRJ ID does not exist in active prj_attribute_master_test'})
+                continue
+            try:
+                def value(name):
+                    v=row.get(name)
+                    return None if v is None or str(v).strip().lower() in {'','nan','none'} else str(v).strip()
+                existing_count = db.execute(text('SELECT COUNT(*) FROM dbo.prj_scanning_prompt_reference_test WHERE prj_id=:prj AND is_active=1'), {'prj':prj}).scalar() or 0
+                display = value('display_order')
+                payload=PromptUpsert(prj_id=prj,attribute_name=value('attribute_name'),display_order=int(float(display)) if display else None,
+                    section=value('section'),sub_section=value('sub_section'),data_type=value('data_type'),calculated_or_reported=value('calculated_or_reported'),calculation_logic=value('calculation_logic'),segment=value('segment'),attribute_description=value('attribute_description'))
+                service.upsert_prompt(payload,current_user(user),source='PROMPT_BULK_UPLOAD')
+                if existing_count: updated += max(1,len(service.active_scopes(prj)))
+                else: inserted += max(1,len(service.active_scopes(prj)))
+            except Exception as exc:
+                db.rollback(); rejected.append({'row':int(excel_row)+1,'prj_id':prj,'reason':f'{type(exc).__name__}: {getattr(exc,"orig",exc)}'})
+        return {'status':'completed' if not rejected else 'completed_with_rejections','inserted':inserted,'updated':updated,'rejected':rejected,'rejected_count':len(rejected)}
+    except Exception as exc:
+        db.rollback(); raise HTTPException(400, f'Prompt bulk commit failed: {type(exc).__name__}: {getattr(exc,"orig",exc)}')
 
 @router.post('/generate-sql')
 async def generate_sql(file: UploadFile = File(...), sheet_name: str = Form(...), mode: str = Query('INSERT_ONLY')):
