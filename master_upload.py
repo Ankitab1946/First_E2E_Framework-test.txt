@@ -14,6 +14,7 @@ from DataDictionaryAdminApp.core.database import get_db
 from DataDictionaryAdminApp.service.data_dictionary_service import DataDictionaryService
 from DataDictionaryAdminApp.service.excel_service import ExcelService
 from DataDictionaryAdminApp.utils.security import current_user, is_admin_role
+from DataDictionaryAdminApp.config import get_settings
 
 router = APIRouter(prefix='/master-upload', tags=['Master Dictionary Upload'])
 logger = logging.getLogger(__name__)
@@ -165,39 +166,109 @@ async def delta_master(file: UploadFile = File(...), db: Session = Depends(get_d
 async def finalize_master(
     file: UploadFile = File(...), user: str | None = Query(None), db: Session = Depends(get_db), x_app_role: str | None = Header(None)
 ):
-    """Upload valid rows, preserve successful rows, and return detailed rejections for every failed row."""
+    """Fast batch upload for Master Dictionary workbooks.
+
+    Validation happens in Python. Valid rows are processed in compact SQL Server
+    batches by ``bulk_upsert_attributes``. If a batch fails, it falls back to
+    the existing row-safe method only for that batch, preserving diagnostics.
+    """
     _admin(x_app_role)
     try:
         df = ExcelService().read_master_workbook(await file.read())
     except Exception as exc:
         return _failure('workbook_parse', exc)
 
+    settings = get_settings()
+    batch_size = max(50, min(int(settings.bulk_upload_batch_size), 500))
+    actor = current_user(user)
     service = DataDictionaryService(db)
     inserted = updated = 0
-    rejected = []
+    rejected: list[dict[str, Any]] = []
+
+    try:
+        portfolio_refs = db.execute(text(
+            'SELECT port_ref_id,port_name,sector_name FROM dbo.prj_portfolio_reference_test WHERE is_active=1 ORDER BY port_ref_id'
+        )).mappings().all()
+    except Exception as exc:
+        db.rollback()
+        return _failure('bulk_preload', exc)
+
+    parsed: list[tuple[int, AttributeUpsert, dict]] = []
     for dataframe_index, row in df.iterrows():
-        # Excel row is header row + 2 because DataFrame index is zero-based.
         row_no = int(dataframe_index) + 4
         row_input = _safe_json(row.to_dict())
-        payload = None
         try:
             payload = _payload(row)
             if not payload.prj_id or not payload.prj_attribute_name:
                 raise ValueError('PRJ ID and PRJ Attribute Name are mandatory.')
-            exists = service.repo.get_attribute(payload.prj_id) is not None
-            service.upsert_attribute(payload, current_user(user), source='MASTER_EXCEL_UPLOAD')
-            if exists:
-                updated += 1
-            else:
-                inserted += 1
+            parsed.append((row_no, payload, row_input))
         except Exception as exc:
+            rejected.append(_failure('row_validation', exc, row=row_no, input_row=row_input))
+
+    # Use a divide-and-conquer batch strategy.  A bad row must not force the
+    # entire workbook through the slow ORM fallback (which previously led to
+    # hundreds of db.flush() calls and UI timeouts).  Valid subsets continue
+    # to use the set-oriented SQL Server path; only an isolated failing row is
+    # rejected with its real database error.
+    failed_batches: list[dict[str, Any]] = []
+
+    def process_batch(batch: list[tuple[int, AttributeUpsert, dict]]) -> None:
+        nonlocal inserted, updated
+        if not batch:
+            return
+        payloads = [item[1] for item in batch]
+        try:
+            outcome = service.bulk_upsert_attributes(payloads, actor, portfolio_refs=portfolio_refs)
+            db.commit()
+            inserted += outcome['inserted']
+            updated += outcome['updated']
+            return
+        except Exception as batch_exc:
             db.rollback()
-            rejected.append(_failure('row_upsert', exc, row=row_no, prj_id=(payload.prj_id if payload else None), input_row=row_input))
+            logger.exception(
+                'Master Dictionary set-oriented batch failed. rows=%s-%s size=%s',
+                batch[0][0], batch[-1][0], len(batch),
+            )
+            # Split only when there is more than one row.  This retains batch
+            # performance for valid data and pinpoints an invalid record without
+            # using the slow interactive ORM upsert / flush path.
+            if len(batch) > 1:
+                midpoint = len(batch) // 2
+                process_batch(batch[:midpoint])
+                process_batch(batch[midpoint:])
+                return
+
+            row_no, payload, row_input = batch[0]
+            details = _failure(
+                'set_oriented_row_upsert',
+                batch_exc,
+                row=row_no,
+                prj_id=payload.prj_id,
+                input_row=row_input,
+            )
+            details['resolution'] = (
+                'The row was rejected after set-oriented SQL Server validation. '
+                'No ORM fallback was used, so other rows can complete quickly. '
+                'Correct the reported field/database issue and re-upload the row.'
+            )
+            rejected.append(details)
+            failed_batches.append({
+                'first_excel_row': row_no,
+                'last_excel_row': row_no,
+                'reason': details['reason'],
+            })
+
+    for offset in range(0, len(parsed), batch_size):
+        process_batch(parsed[offset:offset + batch_size])
 
     return {
         'status': 'completed' if not rejected else 'completed_with_rejections',
         'inserted': inserted,
         'updated': updated,
         'rejected_count': len(rejected),
+        'batch_size': batch_size,
+        'mode': 'set_oriented_batch_with_fast_isolation',
+        'failed_batches': failed_batches,
         'rejected': rejected,
     }
+
