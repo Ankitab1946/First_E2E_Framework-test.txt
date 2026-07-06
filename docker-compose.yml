@@ -1,0 +1,65 @@
+name: data-dictionary-admin-app
+
+services:
+  api:
+    build:
+      context: .
+      target: api
+    env_file: .env
+    environment:
+      API_WORKERS: ${API_WORKERS:-1}
+    expose:
+      - "8503"
+    networks:
+      app-network:
+        aliases:
+          - data-dictionary-admin-app-api
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8503/api/v1/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: .
+      target: ui
+    env_file: .env
+    environment:
+      API_BASE_URL: http://api:8503/api/v1
+    expose:
+      - "8501"
+    networks:
+      app-network:
+        aliases:
+          - data-dictionary-admin-app-ui
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway:
+    image: nginx:1.27-alpine
+    container_name: data-dictionary-admin-app-gateway
+    depends_on:
+      - ui
+    ports:
+      - "${APP_PUBLIC_PORT:-80}:80"
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      app-network:
+        aliases:
+          - data-dictionary-admin-app
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  app-network:
+    name: data-dictionary-admin-app-network
+    driver: bridge
